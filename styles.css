@@ -115,6 +115,10 @@ body::before {
   padding: calc(var(--safe-area-top) + 12px) calc(var(--safe-area-right) + 16px) calc(var(--safe-area-bottom) + 24px) calc(var(--safe-area-left) + 16px);
 }
 
+.app[hidden] {
+  display: none;
+}
+
 /* ===== Header ===== */
 .header {
   margin-bottom: 24px;
@@ -153,6 +157,38 @@ body::before {
   font-size: 13px;
   color: var(--text-muted);
   margin-top: 2px;
+}
+
+.title-group.center {
+  text-align: center;
+  flex: 1;
+}
+
+.header-spacer {
+  width: 80px;
+}
+
+.back-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.back-btn:hover {
+  background: var(--bg-card-hover);
+}
+
+.back-btn span:first-child {
+  font-size: 18px;
 }
 
 .icon-btn {
@@ -293,9 +329,15 @@ body::before {
   position: relative;
 }
 
-/* ===== Add Day Button ===== */
+/* ===== Action Buttons ===== */
+.action-buttons {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .add-day-btn {
-  width: 100%;
   padding: 18px;
   display: flex;
   align-items: center;
@@ -308,7 +350,6 @@ body::before {
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
-  margin-bottom: 16px;
   box-shadow: var(--shadow-md), 0 0 30px var(--accent-primary-glow);
   transition: all 0.3s ease;
 }
@@ -331,6 +372,34 @@ body::before {
   border-radius: var(--radius-sm);
   font-size: 20px;
   font-weight: 300;
+}
+
+.analysis-btn {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.analysis-btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--accent-primary);
+}
+
+.analysis-icon {
+  font-size: 24px;
 }
 
 /* ===== Records ===== */
@@ -466,6 +535,207 @@ body::before {
 .empty-desc {
   font-size: 14px;
   color: var(--text-muted);
+}
+
+/* ===== Analysis Page ===== */
+.analysis-page {
+  background: var(--bg-primary);
+}
+
+.analysis-summary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.analysis-stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.analysis-stat-icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-md);
+}
+
+.analysis-stat-icon.profit {
+  background: linear-gradient(135deg, var(--accent-success-glow), rgba(52, 211, 153, 0.1));
+}
+
+.analysis-stat-info {
+  flex: 1;
+}
+
+.analysis-stat-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.analysis-stat-value {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* Stock Ranking */
+.stock-ranking {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stock-rank-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  transition: all 0.2s ease;
+}
+
+.stock-rank-item:hover {
+  background: var(--bg-card-hover);
+}
+
+.rank-number {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.rank-number.gold {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  color: #1f2937;
+}
+
+.rank-number.silver {
+  background: linear-gradient(135deg, #9ca3af, #6b7280);
+  color: white;
+}
+
+.rank-number.bronze {
+  background: linear-gradient(135deg, #d97706, #b45309);
+  color: white;
+}
+
+.stock-rank-info {
+  flex: 1;
+}
+
+.stock-rank-symbol {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.stock-rank-trades {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.stock-rank-profit {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.stock-rank-profit.positive {
+  color: var(--accent-success);
+}
+
+.stock-rank-profit.negative {
+  color: var(--accent-danger);
+}
+
+/* Monthly Chart */
+.monthly-chart-container {
+  height: 250px;
+  position: relative;
+}
+
+/* Best/Worst Days */
+.best-worst-days {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.day-highlight {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+}
+
+.day-highlight.best {
+  background: var(--accent-success-glow);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.day-highlight.worst {
+  background: var(--accent-danger-glow);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.day-highlight-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+}
+
+.day-highlight-info {
+  flex: 1;
+}
+
+.day-highlight-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.day-highlight-date {
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.day-highlight-profit {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.day-highlight.best .day-highlight-profit {
+  color: var(--accent-success);
+}
+
+.day-highlight.worst .day-highlight-profit {
+  color: var(--accent-danger);
 }
 
 /* ===== Sheet (Modal) ===== */
@@ -827,6 +1097,21 @@ body::before {
   cursor: pointer;
 }
 
+.settings-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 8px;
+  margin-bottom: -4px;
+  padding-left: 4px;
+}
+
+.settings-section-title:first-child {
+  margin-top: 0;
+}
+
 .settings-footer {
   margin-top: 24px;
   text-align: center;
@@ -836,6 +1121,43 @@ body::before {
 
 .settings-footer p {
   margin: 4px 0;
+}
+
+/* Import Paste */
+.import-paste-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.paste-textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 14px 16px;
+  font-size: 13px;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  outline: none;
+  resize: vertical;
+  transition: all 0.2s ease;
+}
+
+.paste-textarea:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-primary-glow);
+}
+
+.paste-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.paste-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 
 /* ===== Responsive ===== */
@@ -864,6 +1186,14 @@ body::before {
   
   .trade-entry .profit-input {
     width: 100%;
+  }
+  
+  .action-buttons {
+    grid-template-columns: 1fr;
+  }
+  
+  .analysis-summary {
+    grid-template-columns: 1fr;
   }
 }
 

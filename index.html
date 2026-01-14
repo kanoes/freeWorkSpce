@@ -17,7 +17,7 @@
 </head>
 
 <body>
-  <div class="app">
+  <div class="app" id="mainPage">
     <!-- Header -->
     <header class="header">
       <div class="header-content">
@@ -43,8 +43,8 @@
         <div class="summary-card highlight">
           <div class="summary-icon">💰</div>
           <div class="summary-info">
-            <span class="summary-label">本月收益</span>
-            <span class="summary-value" id="monthProfit">¥0</span>
+            <span class="summary-label">总收益</span>
+            <span class="summary-value" id="totalProfit">¥0</span>
           </div>
         </div>
         <div class="summary-card">
@@ -78,11 +78,17 @@
         </div>
       </section>
 
-      <!-- Add New Day Button -->
-      <button class="add-day-btn" id="btnAddDay">
-        <span class="add-icon">+</span>
-        <span>添加今日记录</span>
-      </button>
+      <!-- Action Buttons -->
+      <div class="action-buttons">
+        <button class="add-day-btn" id="btnAddDay">
+          <span class="add-icon">+</span>
+          <span>添加今日记录</span>
+        </button>
+        <button class="analysis-btn" id="btnAnalysis">
+          <span class="analysis-icon">📊</span>
+          <span>数据分析</span>
+        </button>
+      </div>
 
       <!-- Records List -->
       <section class="card records-card">
@@ -99,6 +105,93 @@
             <div class="empty-icon">📝</div>
             <div class="empty-title">还没有记录</div>
             <div class="empty-desc">点击上方按钮开始记录你的第一天</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Analysis Page -->
+  <div class="app analysis-page" id="analysisPage" hidden>
+    <header class="header">
+      <div class="header-content">
+        <button class="back-btn" id="btnBackFromAnalysis">
+          <span>←</span>
+          <span>返回</span>
+        </button>
+        <div class="title-group center">
+          <h1>数据分析</h1>
+        </div>
+        <div class="header-spacer"></div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- Analysis Summary -->
+      <section class="analysis-summary">
+        <div class="analysis-stat-card">
+          <div class="analysis-stat-icon profit">💹</div>
+          <div class="analysis-stat-info">
+            <span class="analysis-stat-label">总收益</span>
+            <span class="analysis-stat-value" id="analysisTotalProfit">¥0</span>
+          </div>
+        </div>
+        <div class="analysis-stat-card">
+          <div class="analysis-stat-icon">📈</div>
+          <div class="analysis-stat-info">
+            <span class="analysis-stat-label">盈利天数</span>
+            <span class="analysis-stat-value" id="analysisWinDays">0</span>
+          </div>
+        </div>
+        <div class="analysis-stat-card">
+          <div class="analysis-stat-icon">📉</div>
+          <div class="analysis-stat-info">
+            <span class="analysis-stat-label">亏损天数</span>
+            <span class="analysis-stat-value" id="analysisLossDays">0</span>
+          </div>
+        </div>
+        <div class="analysis-stat-card">
+          <div class="analysis-stat-icon">🏷️</div>
+          <div class="analysis-stat-info">
+            <span class="analysis-stat-label">交易股票数</span>
+            <span class="analysis-stat-value" id="analysisStockCount">0</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Stock Ranking -->
+      <section class="card">
+        <div class="card-header">
+          <h2>📊 股票损益排行</h2>
+        </div>
+        <div class="stock-ranking" id="stockRanking">
+          <div class="empty-state">
+            <div class="empty-icon">📈</div>
+            <div class="empty-title">暂无数据</div>
+            <div class="empty-desc">开始记录交易后这里会显示排行</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Monthly Breakdown -->
+      <section class="card">
+        <div class="card-header">
+          <h2>📅 月度收益</h2>
+        </div>
+        <div class="monthly-chart-container">
+          <canvas id="monthlyChart"></canvas>
+        </div>
+      </section>
+
+      <!-- Best/Worst Days -->
+      <section class="card">
+        <div class="card-header">
+          <h2>🏆 最佳 & 最差交易日</h2>
+        </div>
+        <div class="best-worst-days" id="bestWorstDays">
+          <div class="empty-state">
+            <div class="empty-icon">📆</div>
+            <div class="empty-title">暂无数据</div>
           </div>
         </div>
       </section>
@@ -191,28 +284,56 @@
       </div>
 
       <div class="settings-list">
+        <div class="settings-section-title">导出数据</div>
+        
         <button class="settings-item" id="btnExport">
           <div class="settings-item-content">
             <span class="settings-icon">💾</span>
             <div>
-              <div class="settings-title">导出数据</div>
-              <div class="settings-desc">备份所有记录为 JSON 文件</div>
+              <div class="settings-title">下载 JSON 文件</div>
+              <div class="settings-desc">保存备份文件到设备</div>
             </div>
           </div>
           <span class="chevron">›</span>
         </button>
 
+        <button class="settings-item" id="btnExportCopy">
+          <div class="settings-item-content">
+            <span class="settings-icon">📋</span>
+            <div>
+              <div class="settings-title">复制到剪贴板</div>
+              <div class="settings-desc">复制数据文本方便分享</div>
+            </div>
+          </div>
+          <span class="chevron">›</span>
+        </button>
+
+        <div class="settings-section-title">导入数据</div>
+
         <label class="settings-item file-label">
           <div class="settings-item-content">
             <span class="settings-icon">📂</span>
             <div>
-              <div class="settings-title">导入数据</div>
-              <div class="settings-desc">从备份文件恢复</div>
+              <div class="settings-title">从文件导入</div>
+              <div class="settings-desc">选择 JSON 备份文件</div>
             </div>
           </div>
           <input type="file" id="fileImport" accept="application/json" hidden />
           <span class="chevron">›</span>
         </label>
+
+        <button class="settings-item" id="btnImportPaste">
+          <div class="settings-item-content">
+            <span class="settings-icon">📝</span>
+            <div>
+              <div class="settings-title">粘贴文本导入</div>
+              <div class="settings-desc">粘贴之前复制的数据</div>
+            </div>
+          </div>
+          <span class="chevron">›</span>
+        </button>
+
+        <div class="settings-section-title">危险操作</div>
 
         <button class="settings-item danger" id="btnClearAll">
           <div class="settings-item-content">
@@ -229,6 +350,28 @@
       <div class="settings-footer">
         <p>TradeDiary v2.0</p>
         <p>数据仅保存在本地设备</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import Paste Sheet -->
+  <div class="sheet" id="importPasteSheet" aria-hidden="true">
+    <div class="sheet-backdrop" id="importPasteBackdrop"></div>
+    <div class="sheet-panel">
+      <div class="sheet-header">
+        <div>
+          <h3 class="sheet-title">粘贴导入</h3>
+          <p class="sheet-subtitle">将复制的数据粘贴到下方</p>
+        </div>
+        <button class="icon-btn small" id="btnCloseImportPaste">✕</button>
+      </div>
+
+      <div class="import-paste-content">
+        <textarea id="importPasteText" class="paste-textarea" placeholder="在此粘贴 JSON 数据..."></textarea>
+        <div class="paste-actions">
+          <button type="button" class="btn secondary" id="btnCancelImportPaste">取消</button>
+          <button type="button" class="btn primary" id="btnConfirmImportPaste">确认导入</button>
+        </div>
       </div>
     </div>
   </div>

@@ -131,6 +131,7 @@ async function clearAllDays() {
 let DAYS = [];
 let currentFilter = 'all';
 let profitChart = null;
+let monthlyChart = null;
 
 // ===== Chart =====
 function initChart() {
@@ -264,36 +265,27 @@ function updateChart(range = 'week') {
   profitChart.update();
 }
 
-// ===== Summary Stats =====
+// ===== Summary Stats (Total) =====
 function updateSummary() {
-  const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
+  // Get all open days
+  const openDays = DAYS.filter(d => d.status === 'open');
   
-  // Filter this month's open days
-  const monthDays = DAYS.filter(d => {
-    const date = new Date(d.date);
-    return date.getMonth() === currentMonth && 
-           date.getFullYear() === currentYear && 
-           d.status === 'open';
-  });
-  
-  // Calculate month profit
-  let monthProfit = 0;
+  // Calculate total profit
+  let totalProfit = 0;
   let winDays = 0;
   
-  monthDays.forEach(day => {
+  openDays.forEach(day => {
     const dayProfit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
-    monthProfit += dayProfit;
+    totalProfit += dayProfit;
     if (dayProfit > 0) winDays++;
   });
   
-  const tradeDays = monthDays.length;
+  const tradeDays = openDays.length;
   const winRate = tradeDays > 0 ? Math.round((winDays / tradeDays) * 100) : 0;
   
   // Update UI
-  const profitEl = $('#monthProfit');
-  profitEl.textContent = formatMoneyShort(monthProfit);
+  const profitEl = $('#totalProfit');
+  profitEl.textContent = formatMoneyShort(totalProfit);
   profitEl.className = 'summary-value';
   
   $('#tradeDays').textContent = `${tradeDays}天`;
@@ -544,13 +536,288 @@ function closeSettings() {
   $('#settingsSheet').setAttribute('aria-hidden', 'true');
 }
 
+// ===== Analysis Page =====
+function openAnalysisPage() {
+  $('#mainPage').hidden = true;
+  $('#analysisPage').hidden = false;
+  updateAnalysisPage();
+}
+
+function closeAnalysisPage() {
+  $('#analysisPage').hidden = true;
+  $('#mainPage').hidden = false;
+}
+
+function updateAnalysisPage() {
+  updateAnalysisSummary();
+  updateStockRanking();
+  updateMonthlyChart();
+  updateBestWorstDays();
+}
+
+function updateAnalysisSummary() {
+  const openDays = DAYS.filter(d => d.status === 'open');
+  
+  let totalProfit = 0;
+  let winDays = 0;
+  let lossDays = 0;
+  const stockSet = new Set();
+  
+  openDays.forEach(day => {
+    const dayProfit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+    totalProfit += dayProfit;
+    
+    if (dayProfit > 0) winDays++;
+    else if (dayProfit < 0) lossDays++;
+    
+    day.trades?.forEach(t => {
+      if (t.symbol) stockSet.add(t.symbol.toUpperCase());
+    });
+  });
+  
+  const profitEl = $('#analysisTotalProfit');
+  profitEl.textContent = formatMoneyShort(totalProfit);
+  profitEl.style.color = totalProfit >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)';
+  
+  $('#analysisWinDays').textContent = winDays;
+  $('#analysisLossDays').textContent = lossDays;
+  $('#analysisStockCount').textContent = stockSet.size;
+}
+
+function updateStockRanking() {
+  const container = $('#stockRanking');
+  
+  // Aggregate profit by stock symbol
+  const stockMap = new Map();
+  
+  DAYS.forEach(day => {
+    if (day.status !== 'open') return;
+    day.trades?.forEach(t => {
+      if (!t.symbol) return;
+      const symbol = t.symbol.toUpperCase();
+      const profit = Number(t.profit) || 0;
+      
+      if (!stockMap.has(symbol)) {
+        stockMap.set(symbol, { symbol, profit: 0, tradeCount: 0 });
+      }
+      const stock = stockMap.get(symbol);
+      stock.profit += profit;
+      stock.tradeCount++;
+    });
+  });
+  
+  // Sort by profit (highest to lowest)
+  const stocks = Array.from(stockMap.values())
+    .sort((a, b) => b.profit - a.profit);
+  
+  if (stocks.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📈</div>
+        <div class="empty-title">暂无数据</div>
+        <div class="empty-desc">开始记录交易后这里会显示排行</div>
+      </div>
+    `;
+    return;
+  }
+  
+  container.innerHTML = stocks.map((stock, index) => {
+    let rankClass = '';
+    if (index === 0) rankClass = 'gold';
+    else if (index === 1) rankClass = 'silver';
+    else if (index === 2) rankClass = 'bronze';
+    
+    const profitClass = stock.profit >= 0 ? 'positive' : 'negative';
+    
+    return `
+      <div class="stock-rank-item">
+        <div class="rank-number ${rankClass}">${index + 1}</div>
+        <div class="stock-rank-info">
+          <div class="stock-rank-symbol">${stock.symbol}</div>
+          <div class="stock-rank-trades">${stock.tradeCount}次交易</div>
+        </div>
+        <div class="stock-rank-profit ${profitClass}">${formatMoney(stock.profit)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateMonthlyChart() {
+  const ctx = $('#monthlyChart');
+  if (!ctx) return;
+  
+  // Destroy existing chart
+  if (monthlyChart) {
+    monthlyChart.destroy();
+  }
+  
+  // Aggregate profit by month
+  const monthMap = new Map();
+  
+  DAYS.forEach(day => {
+    if (day.status !== 'open') return;
+    const date = new Date(day.date);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    
+    const dayProfit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+    
+    if (!monthMap.has(key)) {
+      monthMap.set(key, 0);
+    }
+    monthMap.set(key, monthMap.get(key) + dayProfit);
+  });
+  
+  // Sort by month
+  const sortedMonths = Array.from(monthMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  
+  const labels = sortedMonths.map(([key]) => {
+    const [year, month] = key.split('-');
+    return `${year}/${month}`;
+  });
+  
+  const data = sortedMonths.map(([, profit]) => profit);
+  const colors = data.map(v => v >= 0 ? '#34d399' : '#f87171');
+  
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const gridColor = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)';
+  const textColor = isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)';
+  
+  monthlyChart = new Chart(ctx.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: '月度收益',
+        data,
+        backgroundColor: colors,
+        borderRadius: 8,
+        borderSkipped: false
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          backgroundColor: isDark ? 'rgba(17, 24, 39, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+          titleColor: isDark ? '#f9fafb' : '#0f172a',
+          bodyColor: isDark ? '#f9fafb' : '#0f172a',
+          borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+          borderWidth: 1,
+          padding: 12,
+          displayColors: false,
+          callbacks: {
+            label: (item) => formatMoney(item.raw)
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: {
+            display: false
+          },
+          ticks: {
+            color: textColor,
+            font: { size: 11 }
+          }
+        },
+        y: {
+          grid: {
+            color: gridColor
+          },
+          ticks: {
+            color: textColor,
+            font: { size: 11 },
+            callback: (value) => `¥${value}`
+          }
+        }
+      }
+    }
+  });
+}
+
+function updateBestWorstDays() {
+  const container = $('#bestWorstDays');
+  
+  const openDays = DAYS.filter(d => d.status === 'open');
+  
+  if (openDays.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📆</div>
+        <div class="empty-title">暂无数据</div>
+      </div>
+    `;
+    return;
+  }
+  
+  // Calculate profit for each day
+  const daysWithProfit = openDays.map(day => {
+    const profit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+    return { ...day, totalProfit: profit };
+  });
+  
+  // Find best and worst
+  const sorted = [...daysWithProfit].sort((a, b) => b.totalProfit - a.totalProfit);
+  const best = sorted[0];
+  const worst = sorted[sorted.length - 1];
+  
+  let html = '';
+  
+  if (best && best.totalProfit > 0) {
+    const dateInfo = formatDate(best.date);
+    html += `
+      <div class="day-highlight best">
+        <div class="day-highlight-icon">🏆</div>
+        <div class="day-highlight-info">
+          <div class="day-highlight-label">最佳交易日</div>
+          <div class="day-highlight-date">${dateInfo.year}年${dateInfo.month}${dateInfo.day}日</div>
+        </div>
+        <div class="day-highlight-profit">${formatMoney(best.totalProfit)}</div>
+      </div>
+    `;
+  }
+  
+  if (worst && worst.totalProfit < 0) {
+    const dateInfo = formatDate(worst.date);
+    html += `
+      <div class="day-highlight worst">
+        <div class="day-highlight-icon">📉</div>
+        <div class="day-highlight-info">
+          <div class="day-highlight-label">最差交易日</div>
+          <div class="day-highlight-date">${dateInfo.year}年${dateInfo.month}${dateInfo.day}日</div>
+        </div>
+        <div class="day-highlight-profit">${formatMoney(worst.totalProfit)}</div>
+      </div>
+    `;
+  }
+  
+  if (!html) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📆</div>
+        <div class="empty-title">暂无明显盈亏</div>
+      </div>
+    `;
+  } else {
+    container.innerHTML = html;
+  }
+}
+
 // ===== Export/Import =====
-function exportData() {
-  const data = {
+function getExportData() {
+  return {
     exportedAt: new Date().toISOString(),
     version: '2.0',
     days: DAYS
   };
+}
+
+function exportData() {
+  const data = getExportData();
   
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -563,14 +830,42 @@ function exportData() {
   URL.revokeObjectURL(url);
 }
 
-async function importData(file) {
+async function exportDataToClipboard() {
+  if (!confirm('确定要复制所有数据到剪贴板吗？')) {
+    return;
+  }
+  
+  const data = getExportData();
+  const text = JSON.stringify(data, null, 2);
+  
   try {
-    const text = await file.text();
+    await navigator.clipboard.writeText(text);
+    alert('已复制到剪贴板！');
+  } catch (err) {
+    // Fallback for older browsers
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    textarea.remove();
+    alert('已复制到剪贴板！');
+  }
+}
+
+async function importDataFromText(text) {
+  try {
     const data = JSON.parse(text);
     const days = Array.isArray(data) ? data : (data.days || []);
     
     if (!Array.isArray(days)) {
-      throw new Error('Invalid data format');
+      throw new Error('数据格式不正确');
+    }
+    
+    if (days.length === 0) {
+      throw new Error('没有找到有效数据');
     }
     
     for (const day of days) {
@@ -584,7 +879,48 @@ async function importData(file) {
       });
     }
     
+    return true;
+  } catch (err) {
+    throw err;
+  }
+}
+
+async function importData(file) {
+  try {
+    const text = await file.text();
+    await importDataFromText(text);
+    
     alert('导入成功！');
+    closeSettings();
+    await refresh();
+  } catch (err) {
+    alert('导入失败：' + (err.message || err));
+  }
+}
+
+// ===== Import Paste Sheet =====
+function openImportPasteSheet() {
+  $('#importPasteText').value = '';
+  $('#importPasteSheet').setAttribute('aria-hidden', 'false');
+}
+
+function closeImportPasteSheet() {
+  $('#importPasteSheet').setAttribute('aria-hidden', 'true');
+  $('#importPasteText').value = '';
+}
+
+async function confirmImportPaste() {
+  const text = $('#importPasteText').value.trim();
+  
+  if (!text) {
+    alert('请粘贴数据');
+    return;
+  }
+  
+  try {
+    await importDataFromText(text);
+    alert('导入成功！');
+    closeImportPasteSheet();
     closeSettings();
     await refresh();
   } catch (err) {
@@ -605,6 +941,10 @@ async function refresh() {
 function bindEvents() {
   // Add day button
   $('#btnAddDay').addEventListener('click', () => openDaySheet('add'));
+  
+  // Analysis button
+  $('#btnAnalysis').addEventListener('click', openAnalysisPage);
+  $('#btnBackFromAnalysis').addEventListener('click', closeAnalysisPage);
   
   // Sheet close buttons
   $('#btnCloseSheet').addEventListener('click', closeDaySheet);
@@ -695,10 +1035,13 @@ function bindEvents() {
   $('#btnCloseSettings').addEventListener('click', closeSettings);
   $('#settingsBackdrop').addEventListener('click', closeSettings);
   
-  // Export
+  // Export (download file)
   $('#btnExport').addEventListener('click', exportData);
   
-  // Import
+  // Export (copy to clipboard)
+  $('#btnExportCopy').addEventListener('click', exportDataToClipboard);
+  
+  // Import (from file)
   $('#fileImport').addEventListener('change', (e) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -706,6 +1049,13 @@ function bindEvents() {
       e.target.value = '';
     }
   });
+  
+  // Import (paste text)
+  $('#btnImportPaste').addEventListener('click', openImportPasteSheet);
+  $('#btnCloseImportPaste').addEventListener('click', closeImportPasteSheet);
+  $('#btnCancelImportPaste').addEventListener('click', closeImportPasteSheet);
+  $('#importPasteBackdrop').addEventListener('click', closeImportPasteSheet);
+  $('#btnConfirmImportPaste').addEventListener('click', confirmImportPaste);
   
   // Clear all
   $('#btnClearAll').addEventListener('click', async () => {
@@ -722,6 +1072,9 @@ function bindEvents() {
       profitChart.destroy();
       initChart();
       updateChart($('.chart-tab.active')?.dataset.range || 'week');
+    }
+    if (monthlyChart && !$('#analysisPage').hidden) {
+      updateMonthlyChart();
     }
   });
 }
