@@ -1,7 +1,9 @@
-// ===== Service Worker =====
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+// ===== TradeDiary App =====
+
+// Service Worker Registration
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
   });
 }
 
@@ -9,440 +11,727 @@ if ("serviceWorker" in navigator) {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const fmtDate = (d) => {
-  const dt = new Date(d);
-  const y = dt.getFullYear();
-  const m = String(dt.getMonth() + 1).padStart(2, "0");
-  const da = String(dt.getDate()).padStart(2, "0");
-  return `${y}-${m}-${da}`;
+const formatDate = (dateStr) => {
+  const d = new Date(dateStr);
+  return {
+    full: d.toISOString().split('T')[0],
+    day: d.getDate(),
+    month: d.toLocaleDateString('zh-CN', { month: 'short' }),
+    year: d.getFullYear(),
+    weekday: d.toLocaleDateString('zh-CN', { weekday: 'short' })
+  };
 };
 
-const safeUpper = (s) => (s || "").trim().toUpperCase();
-
-const num = (s) => {
-  const v = Number(String(s).replace(/,/g, "").trim());
-  return Number.isFinite(v) ? v : NaN;
+const formatMoney = (amount) => {
+  const num = Number(amount) || 0;
+  const prefix = num >= 0 ? '+' : '';
+  return `${prefix}¥${num.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 };
 
-const nowLabel = () => {
-  const dt = new Date();
-  return dt.toLocaleString(undefined, { hour: "2-digit", minute: "2-digit" });
+const formatMoneyShort = (amount) => {
+  const num = Number(amount) || 0;
+  return `¥${num.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 };
 
-const downloadText = (filename, text, mime = "application/json") => {
-  const blob = new Blob([text], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-};
+const generateId = () => crypto.randomUUID();
+
+const todayStr = () => new Date().toISOString().split('T')[0];
 
 // ===== IndexedDB =====
-const DB_NAME = "tradelog_db";
-const DB_VER = 1;
-const STORE = "trades";
+const DB_NAME = 'tradediary_db';
+const DB_VERSION = 1;
+const STORE_NAME = 'days';
 
 function openDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VER);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      const store = db.createObjectStore(STORE, { keyPath: "id" });
-      store.createIndex("tradeDate", "tradeDate", { unique: false });
-      store.createIndex("symbol", "symbol", { unique: false });
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    
+    request.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+        store.createIndex('date', 'date', { unique: true });
+      }
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
   });
 }
 
-async function dbTx(mode, fn) {
+async function getAllDays() {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, mode);
-    const store = tx.objectStore(STORE);
-    const res = fn(store);
-    tx.oncomplete = () => resolve(res);
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const index = store.index('date');
+    const request = index.openCursor(null, 'prev');
+    const results = [];
+    
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (cursor) {
+        results.push(cursor.value);
+        cursor.continue();
+      } else {
+        resolve(results);
+      }
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function getDayByDate(dateStr) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const index = store.index('date');
+    const request = index.get(dateStr);
+    
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveDay(day) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    store.put(day);
+    tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
 }
 
-async function getAllTrades() {
+async function deleteDay(id) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, "readonly");
-    const store = tx.objectStore(STORE);
-    const idx = store.index("tradeDate");
-    const req = idx.openCursor(null, "prev"); // newest first
-    const out = [];
-    req.onsuccess = () => {
-      const cur = req.result;
-      if (cur) { out.push(cur.value); cur.continue(); }
-      else resolve(out);
-    };
-    req.onerror = () => reject(req.error);
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    store.delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
   });
 }
 
-async function upsertTrade(trade) {
-  return dbTx("readwrite", (store) => store.put(trade));
-}
-
-async function deleteTrade(id) {
-  return dbTx("readwrite", (store) => store.delete(id));
-}
-
-async function clearAll() {
-  return dbTx("readwrite", (store) => store.clear());
+async function clearAllDays() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    store.clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 // ===== App State =====
-let TRADES = [];
-let FILTER = "";
+let DAYS = [];
+let currentFilter = 'all';
+let profitChart = null;
 
-function computeHoldings(trades) {
-  // 简化：按 symbol 汇总净数量；均价=买入加权均价（SELL 不影响买入均价，仅影响净数量）
-  const map = new Map();
-  for (const t of trades) {
-    const s = safeUpper(t.symbol);
-    if (!s) continue;
-    if (!map.has(s)) map.set(s, { symbol: s, netQty: 0, buyQty: 0, buyCost: 0 });
-    const row = map.get(s);
-    const q = Number(t.quantity) || 0;
-    const p = Number(t.price) || 0;
-
-    if (t.side === "BUY") {
-      row.netQty += q;
-      row.buyQty += q;
-      row.buyCost += q * p;
-    } else {
-      row.netQty -= q;
+// ===== Chart =====
+function initChart() {
+  const ctx = $('#profitChart').getContext('2d');
+  
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const gridColor = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)';
+  const textColor = isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)';
+  
+  profitChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label: '累计收益',
+        data: [],
+        borderColor: '#818cf8',
+        backgroundColor: 'rgba(129, 140, 248, 0.1)',
+        borderWidth: 3,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0,
+        pointHoverRadius: 6,
+        pointHoverBackgroundColor: '#818cf8',
+        pointHoverBorderColor: '#fff',
+        pointHoverBorderWidth: 2
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        intersect: false,
+        mode: 'index'
+      },
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          backgroundColor: isDark ? 'rgba(17, 24, 39, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+          titleColor: isDark ? '#f9fafb' : '#0f172a',
+          bodyColor: isDark ? '#f9fafb' : '#0f172a',
+          borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+          borderWidth: 1,
+          padding: 12,
+          displayColors: false,
+          callbacks: {
+            title: (items) => items[0]?.label || '',
+            label: (item) => `累计: ${formatMoneyShort(item.raw)}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: {
+            display: false
+          },
+          ticks: {
+            color: textColor,
+            font: { size: 11 },
+            maxRotation: 0
+          }
+        },
+        y: {
+          grid: {
+            color: gridColor
+          },
+          ticks: {
+            color: textColor,
+            font: { size: 11 },
+            callback: (value) => `¥${value}`
+          }
+        }
+      }
     }
+  });
+}
+
+function updateChart(range = 'week') {
+  if (!profitChart) return;
+  
+  // Filter open days and sort by date
+  const openDays = DAYS
+    .filter(d => d.status === 'open')
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+  
+  let filteredDays = openDays;
+  const now = new Date();
+  
+  if (range === 'week') {
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    filteredDays = openDays.filter(d => new Date(d.date) >= weekAgo);
+  } else if (range === 'month') {
+    const monthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+    filteredDays = openDays.filter(d => new Date(d.date) >= monthAgo);
   }
-  const arr = Array.from(map.values()).map(r => ({
-    symbol: r.symbol,
-    netQty: r.netQty,
-    avgCost: r.buyQty > 0 ? (r.buyCost / r.buyQty) : 0
-  }));
-  // 排序：净持仓绝对值大在前
-  arr.sort((a,b) => Math.abs(b.netQty) - Math.abs(a.netQty));
-  return arr;
+  
+  // Calculate cumulative profit
+  let cumulative = 0;
+  const labels = [];
+  const data = [];
+  
+  filteredDays.forEach(day => {
+    const profit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+    cumulative += profit;
+    
+    const dateInfo = formatDate(day.date);
+    labels.push(`${dateInfo.month}${dateInfo.day}日`);
+    data.push(cumulative);
+  });
+  
+  profitChart.data.labels = labels;
+  profitChart.data.datasets[0].data = data;
+  
+  // Update gradient based on profit
+  const ctx = $('#profitChart').getContext('2d');
+  const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+  
+  if (cumulative >= 0) {
+    gradient.addColorStop(0, 'rgba(52, 211, 153, 0.3)');
+    gradient.addColorStop(1, 'rgba(52, 211, 153, 0)');
+    profitChart.data.datasets[0].borderColor = '#34d399';
+  } else {
+    gradient.addColorStop(0, 'rgba(248, 113, 113, 0.3)');
+    gradient.addColorStop(1, 'rgba(248, 113, 113, 0)');
+    profitChart.data.datasets[0].borderColor = '#f87171';
+  }
+  profitChart.data.datasets[0].backgroundColor = gradient;
+  
+  profitChart.update();
 }
 
-function updateOverview() {
-  $("#chipTrades").textContent = `${TRADES.length} 笔交易`;
-  $("#chipUpdated").textContent = `更新：${nowLabel()}`;
-
-  const holdings = computeHoldings(TRADES);
-  const nonZero = holdings.filter(h => Math.abs(h.netQty) > 1e-9);
-  $("#statSymbols").textContent = String(nonZero.length);
-
-  const totalNet = nonZero.reduce((acc, h) => acc + h.netQty, 0);
-  $("#statNetQty").textContent = (Math.round(totalNet * 100) / 100).toString();
+// ===== Summary Stats =====
+function updateSummary() {
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  
+  // Filter this month's open days
+  const monthDays = DAYS.filter(d => {
+    const date = new Date(d.date);
+    return date.getMonth() === currentMonth && 
+           date.getFullYear() === currentYear && 
+           d.status === 'open';
+  });
+  
+  // Calculate month profit
+  let monthProfit = 0;
+  let winDays = 0;
+  
+  monthDays.forEach(day => {
+    const dayProfit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+    monthProfit += dayProfit;
+    if (dayProfit > 0) winDays++;
+  });
+  
+  const tradeDays = monthDays.length;
+  const winRate = tradeDays > 0 ? Math.round((winDays / tradeDays) * 100) : 0;
+  
+  // Update UI
+  const profitEl = $('#monthProfit');
+  profitEl.textContent = formatMoneyShort(monthProfit);
+  profitEl.className = 'summary-value';
+  
+  $('#tradeDays').textContent = `${tradeDays}天`;
+  $('#winRate').textContent = `${winRate}%`;
 }
 
-function renderHoldings() {
-  const wrapEmpty = $("#holdingsEmpty");
-  const table = $("#holdingsTable");
+// ===== Records List =====
+function updateMonthFilter() {
+  const select = $('#monthFilter');
+  const months = new Set();
+  
+  DAYS.forEach(d => {
+    const date = new Date(d.date);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    months.add(key);
+  });
+  
+  const sortedMonths = Array.from(months).sort().reverse();
+  
+  select.innerHTML = '<option value="all">全部</option>';
+  sortedMonths.forEach(m => {
+    const [year, month] = m.split('-');
+    const option = document.createElement('option');
+    option.value = m;
+    option.textContent = `${year}年${parseInt(month)}月`;
+    select.appendChild(option);
+  });
+  
+  select.value = currentFilter;
+}
 
-  const holdings = computeHoldings(TRADES);
-  const rows = holdings.filter(h => Math.abs(h.netQty) > 1e-9);
-
-  if (rows.length === 0) {
-    wrapEmpty.hidden = false;
-    table.hidden = true;
-    table.innerHTML = "";
+function renderRecords() {
+  const list = $('#recordsList');
+  const empty = $('#emptyState');
+  
+  let filteredDays = DAYS;
+  
+  if (currentFilter !== 'all') {
+    filteredDays = DAYS.filter(d => {
+      const date = new Date(d.date);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      return key === currentFilter;
+    });
+  }
+  
+  if (filteredDays.length === 0) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    list.appendChild(empty);
     return;
   }
-
-  wrapEmpty.hidden = true;
-  table.hidden = false;
-
-  table.innerHTML = rows.map(h => {
-    const badgeClass = h.netQty > 0 ? "ok" : (h.netQty < 0 ? "danger" : "warn");
-    const badgeText = h.netQty > 0 ? "多" : (h.netQty < 0 ? "空" : "平");
+  
+  empty.style.display = 'none';
+  
+  list.innerHTML = filteredDays.map(day => {
+    const dateInfo = formatDate(day.date);
+    let statusClass = day.status;
+    let statusText = '';
+    let statusIcon = '';
+    
+    switch (day.status) {
+      case 'open':
+        statusText = '开盘';
+        statusIcon = '📈';
+        break;
+      case 'holiday':
+        statusText = '祝日';
+        statusIcon = '🎌';
+        break;
+      case 'closed':
+        statusText = '休日';
+        statusIcon = '🌙';
+        break;
+    }
+    
+    let tradesInfo = '';
+    let profitHtml = '';
+    
+    if (day.status === 'open' && day.trades?.length > 0) {
+      const symbols = day.trades.map(t => t.symbol).filter(Boolean).join(', ');
+      tradesInfo = symbols || '无交易';
+      
+      const totalProfit = day.trades.reduce((sum, t) => sum + (Number(t.profit) || 0), 0);
+      const profitClass = totalProfit > 0 ? 'positive' : (totalProfit < 0 ? 'negative' : 'zero');
+      profitHtml = `<div class="record-profit ${profitClass}">${formatMoney(totalProfit)}</div>`;
+    } else if (day.status === 'open') {
+      tradesInfo = '无交易记录';
+      profitHtml = `<div class="record-profit zero">¥0</div>`;
+    } else {
+      tradesInfo = statusText;
+    }
+    
     return `
-      <div class="hrow">
-        <div class="hleft">
-          <div class="sym">${h.symbol}</div>
-          <div class="meta">买入均价：${h.avgCost.toFixed(2)}</div>
+      <div class="record-item" data-id="${day.id}">
+        <div class="record-date">
+          <div class="day">${dateInfo.day}</div>
+          <div class="month">${dateInfo.month}</div>
         </div>
-        <div class="hright">
-          <div class="badge ${badgeClass}">${badgeText}</div>
-          <div class="meta">净数量：${(Math.round(h.netQty * 100) / 100).toString()}</div>
+        <div class="record-info">
+          <div class="record-status ${statusClass}">
+            <span>${statusIcon}</span>
+            <span>${statusText}</span>
+          </div>
+          <div class="record-trades">${tradesInfo}</div>
         </div>
+        ${profitHtml}
       </div>
     `;
-  }).join("");
-}
-
-function matchesFilter(t, f) {
-  if (!f) return true;
-  const s = safeUpper(f);
-  return safeUpper(t.symbol).includes(s) || (t.note || "").toLowerCase().includes(f.toLowerCase());
-}
-
-function renderTrades() {
-  const list = $("#tradesList");
-  const empty = $("#tradesEmpty");
-
-  const filtered = TRADES.filter(t => matchesFilter(t, FILTER));
-  if (filtered.length === 0) {
-    list.innerHTML = "";
-    empty.hidden = false;
-    return;
-  }
-  empty.hidden = true;
-
-  list.innerHTML = filtered.map(t => {
-    const sideClass = t.side === "BUY" ? "buy" : "sell";
-    const sideText = t.side === "BUY" ? "买入" : "卖出";
-    const total = (Number(t.quantity) || 0) * (Number(t.price) || 0);
-    const note = (t.note || "").trim();
-    return `
-      <div class="item" data-id="${t.id}">
-        <div class="pill ${sideClass}">${sideText}</div>
-        <div class="itemMain">
-          <div class="itemTop">
-            <div class="code">${safeUpper(t.symbol)}</div>
-            <div class="amt">${total.toFixed(2)}</div>
-          </div>
-          <div class="itemSub">
-            <span>${fmtDate(t.tradeDate)}</span>
-            <span>${Number(t.quantity).toFixed(2)} @ ${Number(t.price).toFixed(2)}</span>
-          </div>
-          ${note ? `<div class="itemNote">${escapeHtml(note)}</div>` : ``}
-        </div>
-        <div class="itemBtns">
-          <button class="smallBtn" data-act="edit">编辑</button>
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  // bind edit
-  $$(".item [data-act='edit']").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      const id = e.target.closest(".item").dataset.id;
-      const t = TRADES.find(x => x.id === id);
-      if (t) openSheet("edit", t);
+  }).join('');
+  
+  // Bind click events
+  $$('.record-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const id = item.dataset.id;
+      const day = DAYS.find(d => d.id === id);
+      if (day) openDaySheet('edit', day);
     });
   });
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, ch => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
-  }[ch]));
-}
+// ===== Day Sheet (Add/Edit) =====
+let currentEditDay = null;
+let tradeEntries = [];
 
-async function refresh() {
-  TRADES = await getAllTrades();
-  updateOverview();
-  renderHoldings();
-  renderTrades();
-}
-
-// ===== Sheet (Add/Edit) =====
-const sheet = $("#sheet");
-const sheetBackdrop = $("#sheetBackdrop");
-
-function showSheet() {
-  sheet.classList.add("show");
-  sheet.setAttribute("aria-hidden", "false");
-}
-function hideSheet() {
-  sheet.classList.remove("show");
-  sheet.setAttribute("aria-hidden", "true");
-  $("#formError").hidden = true;
-}
-
-function setSeg(side) {
-  $("#fSide").value = side;
-  $$(".segBtn").forEach(b => b.classList.toggle("active", b.dataset.side === side));
-}
-
-function openSheet(mode, trade = null) {
-  $("#formError").hidden = true;
-
-  if (mode === "add") {
-    $("#sheetTitle").textContent = "新增交易";
-    $("#btnDelete").hidden = true;
-
-    $("#fId").value = "";
-    $("#fSymbol").value = "";
-    $("#fQty").value = "";
-    $("#fPrice").value = "";
-    $("#fNote").value = "";
-    $("#fDate").value = fmtDate(new Date());
-    setSeg("BUY");
+function openDaySheet(mode, day = null) {
+  const sheet = $('#daySheet');
+  const title = $('#sheetTitle');
+  const deleteBtn = $('#btnDeleteDay');
+  
+  currentEditDay = day;
+  tradeEntries = [];
+  
+  if (mode === 'add') {
+    title.textContent = '添加记录';
+    deleteBtn.hidden = true;
+    $('#fDayId').value = '';
+    $('#fDate').value = todayStr();
+    $('#fStatus').value = '';
+    setStatusSelection('');
+    $('#tradesSection').hidden = true;
+    renderTradeEntries();
   } else {
-    $("#sheetTitle").textContent = "编辑交易";
-    $("#btnDelete").hidden = false;
-
-    $("#fId").value = trade.id;
-    $("#fSymbol").value = trade.symbol;
-    $("#fQty").value = String(trade.quantity);
-    $("#fPrice").value = String(trade.price);
-    $("#fNote").value = trade.note || "";
-    $("#fDate").value = fmtDate(trade.tradeDate);
-    setSeg(trade.side || "BUY");
+    title.textContent = '编辑记录';
+    deleteBtn.hidden = false;
+    $('#fDayId').value = day.id;
+    $('#fDate').value = day.date;
+    $('#fStatus').value = day.status;
+    setStatusSelection(day.status);
+    
+    if (day.status === 'open') {
+      $('#tradesSection').hidden = false;
+      tradeEntries = day.trades?.map(t => ({ ...t })) || [];
+      if (tradeEntries.length === 0) {
+        tradeEntries.push({ symbol: '', profit: '' });
+      }
+    } else {
+      $('#tradesSection').hidden = true;
+    }
+    renderTradeEntries();
   }
-
-  showSheet();
-  setTimeout(() => $("#fSymbol").focus(), 60);
+  
+  sheet.setAttribute('aria-hidden', 'false');
 }
 
-function formError(msg) {
-  const el = $("#formError");
-  el.textContent = msg;
-  el.hidden = false;
+function closeDaySheet() {
+  $('#daySheet').setAttribute('aria-hidden', 'true');
+  currentEditDay = null;
+  tradeEntries = [];
 }
 
-$("#btnAdd").addEventListener("click", () => openSheet("add"));
-$("#btnClose").addEventListener("click", hideSheet);
-$("#btnCancel").addEventListener("click", hideSheet);
-sheetBackdrop.addEventListener("click", hideSheet);
+function setStatusSelection(status) {
+  $$('.status-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.status === status);
+  });
+  $('#fStatus').value = status;
+  
+  if (status === 'open') {
+    $('#tradesSection').hidden = false;
+    if (tradeEntries.length === 0) {
+      tradeEntries.push({ symbol: '', profit: '' });
+    }
+    renderTradeEntries();
+  } else {
+    $('#tradesSection').hidden = true;
+  }
+}
 
-$$(".segBtn").forEach(b => {
-  b.addEventListener("click", () => setSeg(b.dataset.side));
-});
+function renderTradeEntries() {
+  const container = $('#tradesListForm');
+  
+  container.innerHTML = tradeEntries.map((trade, index) => `
+    <div class="trade-entry" data-index="${index}">
+      <input type="text" 
+             class="form-input symbol-input" 
+             placeholder="股票代码" 
+             value="${trade.symbol || ''}"
+             data-field="symbol" />
+      <input type="number" 
+             class="form-input profit-input" 
+             placeholder="损益 (¥)" 
+             value="${trade.profit || ''}"
+             step="0.01"
+             data-field="profit" />
+      <button type="button" class="remove-trade-btn" ${tradeEntries.length <= 1 ? 'style="visibility:hidden"' : ''}>×</button>
+    </div>
+  `).join('');
+  
+  // Bind input events
+  container.querySelectorAll('.form-input').forEach(input => {
+    input.addEventListener('input', (e) => {
+      const entry = e.target.closest('.trade-entry');
+      const index = parseInt(entry.dataset.index);
+      const field = e.target.dataset.field;
+      tradeEntries[index][field] = e.target.value;
+      updateDailyTotal();
+    });
+  });
+  
+  // Bind remove buttons
+  container.querySelectorAll('.remove-trade-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const entry = e.target.closest('.trade-entry');
+      const index = parseInt(entry.dataset.index);
+      tradeEntries.splice(index, 1);
+      renderTradeEntries();
+      updateDailyTotal();
+    });
+  });
+  
+  updateDailyTotal();
+}
 
-$("#tradeForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  $("#formError").hidden = true;
-
-  const id = $("#fId").value || crypto.randomUUID();
-  const symbol = safeUpper($("#fSymbol").value);
-  const side = $("#fSide").value || "BUY";
-  const quantity = num($("#fQty").value);
-  const price = num($("#fPrice").value);
-  const tradeDate = $("#fDate").value ? new Date($("#fDate").value).toISOString() : new Date().toISOString();
-  const note = ($("#fNote").value || "").trim();
-
-  if (!symbol) return formError("请输入股票代码。");
-  if (!Number.isFinite(quantity) || quantity <= 0) return formError("数量必须是大于 0 的数字。");
-  if (!Number.isFinite(price) || price <= 0) return formError("价格必须是大于 0 的数字。");
-
-  await upsertTrade({ id, symbol, side, quantity, price, tradeDate, note, updatedAt: new Date().toISOString() });
-  hideSheet();
-  await refresh();
-});
-
-$("#btnDelete").addEventListener("click", async () => {
-  const id = $("#fId").value;
-  if (!id) return;
-  const ok = confirm("确定删除这条交易吗？");
-  if (!ok) return;
-  await deleteTrade(id);
-  hideSheet();
-  await refresh();
-});
-
-// ===== Search =====
-$("#search").addEventListener("input", (e) => {
-  FILTER = e.target.value || "";
-  renderTrades();
-});
+function updateDailyTotal() {
+  const total = tradeEntries.reduce((sum, t) => sum + (Number(t.profit) || 0), 0);
+  const el = $('#dailyTotal');
+  el.textContent = formatMoney(total);
+  el.className = 'daily-total';
+  if (total > 0) el.classList.add('positive');
+  else if (total < 0) el.classList.add('negative');
+}
 
 // ===== Settings Sheet =====
-const settings = $("#settings");
-function showSettings() {
-  settings.classList.add("show");
-  settings.setAttribute("aria-hidden", "false");
-}
-function hideSettings() {
-  settings.classList.remove("show");
-  settings.setAttribute("aria-hidden", "true");
-}
-$("#btnSettings").addEventListener("click", showSettings);
-$("#btnSettingsClose").addEventListener("click", hideSettings);
-$("#settingsBackdrop").addEventListener("click", hideSettings);
-
-// ===== Export / Import / Wipe =====
-function tradesToCSV(trades) {
-  const header = ["id","symbol","side","quantity","price","tradeDate","note"].join(",");
-  const lines = trades.map(t => [
-    t.id,
-    `"${safeUpper(t.symbol).replaceAll('"','""')}"`,
-    t.side,
-    t.quantity,
-    t.price,
-    fmtDate(t.tradeDate),
-    `"${(t.note || "").replaceAll('"','""')}"`
-  ].join(","));
-  return [header, ...lines].join("\n");
+function openSettings() {
+  $('#settingsSheet').setAttribute('aria-hidden', 'false');
 }
 
-$("#btnExportJSON").addEventListener("click", async () => {
-  const data = await getAllTrades();
-  downloadText(`tradelog-backup-${fmtDate(new Date())}.json`, JSON.stringify({ exportedAt: new Date().toISOString(), trades: data }, null, 2));
-});
+function closeSettings() {
+  $('#settingsSheet').setAttribute('aria-hidden', 'true');
+}
 
-$("#btnExportCSV").addEventListener("click", async () => {
-  const data = await getAllTrades();
-  downloadText(`tradelog-${fmtDate(new Date())}.csv`, tradesToCSV(data), "text/csv");
-});
+// ===== Export/Import =====
+function exportData() {
+  const data = {
+    exportedAt: new Date().toISOString(),
+    version: '2.0',
+    days: DAYS
+  };
+  
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `tradediary-backup-${todayStr()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
-$("#btnWipe").addEventListener("click", async () => {
-  const ok = confirm("确定要清空全部数据吗？此操作不可撤销。");
-  if (!ok) return;
-  await clearAll();
-  hideSettings();
-  await refresh();
-});
-
-$("#fileImport").addEventListener("change", async (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
+async function importData(file) {
   try {
     const text = await file.text();
-    const json = JSON.parse(text);
-    const trades = Array.isArray(json) ? json : (json.trades || []);
-    if (!Array.isArray(trades)) throw new Error("格式不正确");
-
-    // 合并导入：逐条 upsert（同 id 会覆盖）
-    for (const t of trades) {
-      if (!t || !t.id) continue;
-      await upsertTrade({
-        id: String(t.id),
-        symbol: safeUpper(t.symbol),
-        side: t.side === "SELL" ? "SELL" : "BUY",
-        quantity: Number(t.quantity) || 0,
-        price: Number(t.price) || 0,
-        tradeDate: t.tradeDate ? new Date(t.tradeDate).toISOString() : new Date().toISOString(),
-        note: (t.note || "").toString(),
+    const data = JSON.parse(text);
+    const days = Array.isArray(data) ? data : (data.days || []);
+    
+    if (!Array.isArray(days)) {
+      throw new Error('Invalid data format');
+    }
+    
+    for (const day of days) {
+      if (!day || !day.id) continue;
+      await saveDay({
+        id: day.id,
+        date: day.date,
+        status: day.status || 'open',
+        trades: day.trades || [],
         updatedAt: new Date().toISOString()
       });
     }
-
-    alert("导入完成 ✅");
-    hideSettings();
+    
+    alert('导入成功！');
+    closeSettings();
     await refresh();
   } catch (err) {
-    alert("导入失败：" + (err?.message || err));
-  } finally {
-    e.target.value = "";
+    alert('导入失败：' + (err.message || err));
   }
-});
+}
 
-// ===== Tabbar quick actions =====
-$("#btnExport").addEventListener("click", () => {
-  showSettings();
-  // 轻微提示：用户更可能用导出 CSV/JSON
-});
-$("#btnImport").addEventListener("click", () => {
-  showSettings();
-});
+// ===== Refresh =====
+async function refresh() {
+  DAYS = await getAllDays();
+  updateSummary();
+  updateMonthFilter();
+  renderRecords();
+  updateChart($('.chart-tab.active')?.dataset.range || 'week');
+}
 
-// ===== Init =====
-(async function init(){
-  // default date
-  $("#fDate").value = fmtDate(new Date());
+// ===== Event Bindings =====
+function bindEvents() {
+  // Add day button
+  $('#btnAddDay').addEventListener('click', () => openDaySheet('add'));
+  
+  // Sheet close buttons
+  $('#btnCloseSheet').addEventListener('click', closeDaySheet);
+  $('#btnCancelSheet').addEventListener('click', closeDaySheet);
+  $('#daySheetBackdrop').addEventListener('click', closeDaySheet);
+  
+  // Status selection
+  $$('.status-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setStatusSelection(btn.dataset.status);
+    });
+  });
+  
+  // Add trade button
+  $('#btnAddTrade').addEventListener('click', () => {
+    tradeEntries.push({ symbol: '', profit: '' });
+    renderTradeEntries();
+  });
+  
+  // Form submit
+  $('#dayForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const id = $('#fDayId').value || generateId();
+    const date = $('#fDate').value;
+    const status = $('#fStatus').value;
+    
+    if (!date) {
+      alert('请选择日期');
+      return;
+    }
+    
+    if (!status) {
+      alert('请选择市场状态');
+      return;
+    }
+    
+    // Check if date already exists (for new entries)
+    if (!$('#fDayId').value) {
+      const existing = await getDayByDate(date);
+      if (existing) {
+        alert('该日期已有记录，请编辑现有记录');
+        return;
+      }
+    }
+    
+    const day = {
+      id,
+      date,
+      status,
+      trades: status === 'open' ? tradeEntries.filter(t => t.symbol || t.profit) : [],
+      updatedAt: new Date().toISOString()
+    };
+    
+    await saveDay(day);
+    closeDaySheet();
+    await refresh();
+  });
+  
+  // Delete day
+  $('#btnDeleteDay').addEventListener('click', async () => {
+    if (!currentEditDay) return;
+    
+    if (confirm('确定要删除这条记录吗？')) {
+      await deleteDay(currentEditDay.id);
+      closeDaySheet();
+      await refresh();
+    }
+  });
+  
+  // Month filter
+  $('#monthFilter').addEventListener('change', (e) => {
+    currentFilter = e.target.value;
+    renderRecords();
+  });
+  
+  // Chart tabs
+  $$('.chart-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      $$('.chart-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      updateChart(tab.dataset.range);
+    });
+  });
+  
+  // Settings
+  $('#btnSettings').addEventListener('click', openSettings);
+  $('#btnCloseSettings').addEventListener('click', closeSettings);
+  $('#settingsBackdrop').addEventListener('click', closeSettings);
+  
+  // Export
+  $('#btnExport').addEventListener('click', exportData);
+  
+  // Import
+  $('#fileImport').addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      importData(file);
+      e.target.value = '';
+    }
+  });
+  
+  // Clear all
+  $('#btnClearAll').addEventListener('click', async () => {
+    if (confirm('确定要清空所有数据吗？此操作不可撤销！')) {
+      await clearAllDays();
+      closeSettings();
+      await refresh();
+    }
+  });
+  
+  // Theme change listener
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (profitChart) {
+      profitChart.destroy();
+      initChart();
+      updateChart($('.chart-tab.active')?.dataset.range || 'week');
+    }
+  });
+}
+
+// ===== Initialize =====
+async function init() {
+  initChart();
+  bindEvents();
   await refresh();
-})();
+}
 
+// Start the app
+init();
