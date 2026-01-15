@@ -1279,35 +1279,35 @@ function bindEvents() {
   // Month filter
   const monthFilterEl = $('#monthFilter');
   monthFilterEl.addEventListener('change', (e) => {
+    console.log('monthFilter changed to:', e.target.value);
     currentFilter = e.target.value;
     currentPage = 1; // Reset to first page when filter changes
     renderRecords();
   });
   // Also handle input event for better Safari compatibility
   monthFilterEl.addEventListener('input', (e) => {
+    console.log('monthFilter input:', e.target.value);
     currentFilter = e.target.value;
     currentPage = 1;
     renderRecords();
   });
   
-  // Pagination - use both click and touchend for better mobile support
+  // Pagination
   const prevBtn = $('#btnPrevPage');
   const nextBtn = $('#btnNextPage');
   
-  const handlePrevPage = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  prevBtn.addEventListener('click', () => {
+    console.log('prevBtn clicked, currentPage:', currentPage);
     if (prevBtn.disabled) return;
     if (currentPage > 1) {
       currentPage--;
       renderRecords();
       $('#recordsList').scrollTop = 0;
     }
-  };
+  });
   
-  const handleNextPage = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  nextBtn.addEventListener('click', () => {
+    console.log('nextBtn clicked, currentPage:', currentPage);
     if (nextBtn.disabled) return;
     const filteredDays = getFilteredDays();
     const totalPages = Math.ceil(filteredDays.length / RECORDS_PER_PAGE);
@@ -1316,10 +1316,7 @@ function bindEvents() {
       renderRecords();
       $('#recordsList').scrollTop = 0;
     }
-  };
-  
-  prevBtn.addEventListener('click', handlePrevPage);
-  nextBtn.addEventListener('click', handleNextPage);
+  });
   
   // Chart tabs
   $$('.chart-tab').forEach(tab => {
@@ -1366,8 +1363,10 @@ function bindEvents() {
     }
   });
   
-  // Theme change listener
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  // Theme change listener - 使用兼容写法支持旧浏览器
+  const mql = window.matchMedia('(prefers-color-scheme: dark)');
+  
+  const onThemeChange = () => {
     if (profitChart) {
       profitChart.destroy();
       initChart();
@@ -1376,7 +1375,17 @@ function bindEvents() {
     if (monthlyChart && !$('#analysisPage').hidden) {
       updateMonthlyChart();
     }
-  });
+  };
+  
+  // 兼容新旧浏览器
+  if (mql.addEventListener) {
+    mql.addEventListener('change', onThemeChange);
+  } else if (mql.addListener) {
+    // 旧浏览器 / 旧 WebView
+    mql.addListener(onThemeChange);
+  }
+  
+  console.log('bindEvents ok');
 }
 
 // ===== Initialize =====
