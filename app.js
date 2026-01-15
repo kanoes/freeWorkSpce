@@ -379,20 +379,21 @@ function getFilteredDays() {
 
 function renderRecords() {
   const list = $('#recordsList');
-  const empty = $('#emptyState');
   const pagination = $('#recordsPagination');
   
   const filteredDays = getFilteredDays();
   
   if (filteredDays.length === 0) {
-    list.innerHTML = '';
-    empty.style.display = 'block';
-    list.appendChild(empty);
+    list.innerHTML = `
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">📝</div>
+        <div class="empty-title">还没有记录</div>
+        <div class="empty-desc">点击上方按钮开始记录你的第一天</div>
+      </div>
+    `;
     pagination.hidden = true;
     return;
   }
-
-  empty.style.display = 'none';
   
   // Calculate pagination
   const totalPages = Math.ceil(filteredDays.length / RECORDS_PER_PAGE);
