@@ -466,11 +466,25 @@ function renderRecords() {
   }).join('');
   
   // Update pagination
+  const prevBtn = $('#btnPrevPage');
+  const nextBtn = $('#btnNextPage');
+  
   if (totalPages > 1) {
     pagination.hidden = false;
     $('#paginationInfo').textContent = `${currentPage} / ${totalPages}`;
-    $('#btnPrevPage').disabled = currentPage <= 1;
-    $('#btnNextPage').disabled = currentPage >= totalPages;
+    
+    // Use removeAttribute/setAttribute for more reliable disabled state
+    if (currentPage <= 1) {
+      prevBtn.setAttribute('disabled', 'disabled');
+    } else {
+      prevBtn.removeAttribute('disabled');
+    }
+    
+    if (currentPage >= totalPages) {
+      nextBtn.setAttribute('disabled', 'disabled');
+    } else {
+      nextBtn.removeAttribute('disabled');
+    }
   } else {
     pagination.hidden = true;
   }
@@ -930,11 +944,11 @@ function calculateDividend(profit) {
   const ratio = 1 / dividendRatio;
   
   if (profit >= 0) {
-    // Profit: dividend = profit * ratio * 80% (after tax)
-    return profit * ratio * 0.8;
+    // Profit: dividend = profit * ratio * 80% (after tax), round up to integer
+    return Math.ceil(profit * ratio * 0.8);
   } else {
-    // Loss: share = loss * ratio * 100%
-    return profit * ratio;
+    // Loss: share = loss * ratio * 100%, round up (more negative) to integer
+    return Math.floor(profit * ratio);
   }
 }
 
@@ -1277,19 +1291,25 @@ function bindEvents() {
   });
   
   // Pagination
-  $('#btnPrevPage').addEventListener('click', () => {
+  $('#btnPrevPage').addEventListener('click', (e) => {
+    e.preventDefault();
     if (currentPage > 1) {
       currentPage--;
       renderRecords();
+      // Scroll to top of records
+      $('#recordsList').scrollTop = 0;
     }
   });
   
-  $('#btnNextPage').addEventListener('click', () => {
+  $('#btnNextPage').addEventListener('click', (e) => {
+    e.preventDefault();
     const filteredDays = getFilteredDays();
     const totalPages = Math.ceil(filteredDays.length / RECORDS_PER_PAGE);
     if (currentPage < totalPages) {
       currentPage++;
       renderRecords();
+      // Scroll to top of records
+      $('#recordsList').scrollTop = 0;
     }
   });
   
