@@ -1,4 +1,4 @@
-// ===== TradeDiary App =====
+// ===== 甜饼工坊 App =====
 
 // Service Worker Registration
 if ('serviceWorker' in navigator) {
@@ -36,6 +36,47 @@ const formatMoneyShort = (amount) => {
 const generateId = () => crypto.randomUUID();
 
 const todayStr = () => new Date().toISOString().split('T')[0];
+
+// ===== Company Name Mapping =====
+let companyMap = new Map(); // code -> { name, market }
+
+async function loadCompanyData() {
+  try {
+    const response = await fetch('./companies_tse.json');
+    if (!response.ok) return;
+    
+    const data = await response.json();
+    if (data.companies && Array.isArray(data.companies)) {
+      data.companies.forEach(company => {
+        // Store with uppercase code for case-insensitive lookup
+        companyMap.set(company.code.toUpperCase(), {
+          name: company.name,
+          market: company.market
+        });
+      });
+      console.log(`Loaded ${companyMap.size} company records`);
+    }
+  } catch (err) {
+    console.warn('Could not load company data:', err);
+  }
+}
+
+// Get company name by stock code, returns code if not found
+function getCompanyName(code) {
+  if (!code) return '';
+  const company = companyMap.get(code.toUpperCase());
+  return company ? company.name : code;
+}
+
+// Get display text: company name with code in parentheses
+function getStockDisplayName(code) {
+  if (!code) return '';
+  const company = companyMap.get(code.toUpperCase());
+  if (company) {
+    return company.name;
+  }
+  return code;
+}
 
 // ===== IndexedDB =====
 const DB_NAME = 'tradediary_db';
@@ -132,6 +173,11 @@ let DAYS = [];
 let currentFilter = 'all';
 let profitChart = null;
 let monthlyChart = null;
+let currentPage = 1;
+const RECORDS_PER_PAGE = 7;
+
+// Dividend settings
+let dividendRatio = 3; // Default 1/3
 
 // ===== Chart =====
 function initChart() {
@@ -148,14 +194,14 @@ function initChart() {
       datasets: [{
         label: '累计收益',
         data: [],
-        borderColor: '#818cf8',
-        backgroundColor: 'rgba(129, 140, 248, 0.1)',
+        borderColor: '#f59e0b',
+        backgroundColor: 'rgba(245, 158, 11, 0.1)',
         borderWidth: 3,
         fill: true,
         tension: 0.4,
         pointRadius: 0,
         pointHoverRadius: 6,
-        pointHoverBackgroundColor: '#818cf8',
+        pointHoverBackgroundColor: '#f59e0b',
         pointHoverBorderColor: '#fff',
         pointHoverBorderWidth: 2
       }]
@@ -255,7 +301,7 @@ function updateChart(range = 'week') {
     gradient.addColorStop(0, 'rgba(52, 211, 153, 0.3)');
     gradient.addColorStop(1, 'rgba(52, 211, 153, 0)');
     profitChart.data.datasets[0].borderColor = '#34d399';
-  } else {
+    } else {
     gradient.addColorStop(0, 'rgba(248, 113, 113, 0.3)');
     gradient.addColorStop(1, 'rgba(248, 113, 113, 0)');
     profitChart.data.datasets[0].borderColor = '#f87171';
@@ -292,7 +338,7 @@ function updateSummary() {
   $('#winRate').textContent = `${winRate}%`;
 }
 
-// ===== Records List =====
+// ===== Records List with Pagination =====
 function updateMonthFilter() {
   const select = $('#monthFilter');
   const months = new Set();
@@ -317,10 +363,7 @@ function updateMonthFilter() {
   select.value = currentFilter;
 }
 
-function renderRecords() {
-  const list = $('#recordsList');
-  const empty = $('#emptyState');
-  
+function getFilteredDays() {
   let filteredDays = DAYS;
   
   if (currentFilter !== 'all') {
@@ -331,16 +374,38 @@ function renderRecords() {
     });
   }
   
+  return filteredDays;
+}
+
+function renderRecords() {
+  const list = $('#recordsList');
+  const empty = $('#emptyState');
+  const pagination = $('#recordsPagination');
+  
+  const filteredDays = getFilteredDays();
+  
   if (filteredDays.length === 0) {
     list.innerHTML = '';
     empty.style.display = 'block';
     list.appendChild(empty);
+    pagination.hidden = true;
     return;
   }
-  
+
   empty.style.display = 'none';
   
-  list.innerHTML = filteredDays.map(day => {
+  // Calculate pagination
+  const totalPages = Math.ceil(filteredDays.length / RECORDS_PER_PAGE);
+  
+  // Ensure current page is valid
+  if (currentPage > totalPages) currentPage = totalPages;
+  if (currentPage < 1) currentPage = 1;
+  
+  const startIndex = (currentPage - 1) * RECORDS_PER_PAGE;
+  const endIndex = startIndex + RECORDS_PER_PAGE;
+  const pageDays = filteredDays.slice(startIndex, endIndex);
+  
+  list.innerHTML = pageDays.map(day => {
     const dateInfo = formatDate(day.date);
     let statusClass = day.status;
     let statusText = '';
@@ -365,8 +430,12 @@ function renderRecords() {
     let profitHtml = '';
     
     if (day.status === 'open' && day.trades?.length > 0) {
-      const symbols = day.trades.map(t => t.symbol).filter(Boolean).join(', ');
-      tradesInfo = symbols || '无交易';
+      // Use company names instead of stock codes
+      const names = day.trades
+        .map(t => t.symbol ? getStockDisplayName(t.symbol) : null)
+        .filter(Boolean)
+        .join(', ');
+      tradesInfo = names || '无交易';
       
       const totalProfit = day.trades.reduce((sum, t) => sum + (Number(t.profit) || 0), 0);
       const profitClass = totalProfit > 0 ? 'positive' : (totalProfit < 0 ? 'negative' : 'zero');
@@ -388,13 +457,23 @@ function renderRecords() {
           <div class="record-status ${statusClass}">
             <span>${statusIcon}</span>
             <span>${statusText}</span>
-          </div>
+        </div>
           <div class="record-trades">${tradesInfo}</div>
         </div>
         ${profitHtml}
       </div>
     `;
   }).join('');
+  
+  // Update pagination
+  if (totalPages > 1) {
+    pagination.hidden = false;
+    $('#paginationInfo').textContent = `${currentPage} / ${totalPages}`;
+    $('#btnPrevPage').disabled = currentPage <= 1;
+    $('#btnNextPage').disabled = currentPage >= totalPages;
+  } else {
+    pagination.hidden = true;
+  }
   
   // Bind click events
   $$('.record-item').forEach(item => {
@@ -476,22 +555,32 @@ function setStatusSelection(status) {
 function renderTradeEntries() {
   const container = $('#tradesListForm');
   
-  container.innerHTML = tradeEntries.map((trade, index) => `
-    <div class="trade-entry" data-index="${index}">
-      <input type="text" 
-             class="form-input symbol-input" 
-             placeholder="股票代码" 
-             value="${trade.symbol || ''}"
-             data-field="symbol" />
-      <input type="number" 
-             class="form-input profit-input" 
-             placeholder="损益 (¥)" 
-             value="${trade.profit || ''}"
-             step="0.01"
-             data-field="profit" />
-      <button type="button" class="remove-trade-btn" ${tradeEntries.length <= 1 ? 'style="visibility:hidden"' : ''}>×</button>
-    </div>
-  `).join('');
+  container.innerHTML = tradeEntries.map((trade, index) => {
+    const companyName = trade.symbol ? getCompanyName(trade.symbol) : '';
+    const showCompanyName = companyName && companyName !== trade.symbol;
+    
+    return `
+      <div class="trade-entry" data-index="${index}">
+        <div class="trade-input-group">
+          <input type="text" 
+                 class="form-input symbol-input" 
+                 placeholder="股票代码" 
+                 value="${trade.symbol || ''}"
+                 data-field="symbol" />
+          <div class="company-name-hint ${showCompanyName ? 'visible' : ''}" data-hint-index="${index}">
+            ${showCompanyName ? companyName : ''}
+          </div>
+          </div>
+        <input type="number" 
+               class="form-input profit-input" 
+               placeholder="损益 (¥)" 
+               value="${trade.profit || ''}"
+               step="0.01"
+               data-field="profit" />
+        <button type="button" class="remove-trade-btn" ${tradeEntries.length <= 1 ? 'style="visibility:hidden"' : ''}>×</button>
+        </div>
+    `;
+  }).join('');
   
   // Bind input events
   container.querySelectorAll('.form-input').forEach(input => {
@@ -500,6 +589,22 @@ function renderTradeEntries() {
       const index = parseInt(entry.dataset.index);
       const field = e.target.dataset.field;
       tradeEntries[index][field] = e.target.value;
+      
+      // Update company name hint when symbol changes
+      if (field === 'symbol') {
+        const hint = entry.querySelector('.company-name-hint');
+        const companyName = getCompanyName(e.target.value);
+        const showHint = companyName && companyName !== e.target.value;
+        
+        if (showHint) {
+          hint.textContent = companyName;
+          hint.classList.add('visible');
+        } else {
+          hint.textContent = '';
+          hint.classList.remove('visible');
+        }
+      }
+      
       updateDailyTotal();
     });
   });
@@ -616,7 +721,7 @@ function updateStockRanking() {
         <div class="empty-icon">📈</div>
         <div class="empty-title">暂无数据</div>
         <div class="empty-desc">开始记录交易后这里会显示排行</div>
-      </div>
+        </div>
     `;
     return;
   }
@@ -628,13 +733,15 @@ function updateStockRanking() {
     else if (index === 2) rankClass = 'bronze';
     
     const profitClass = stock.profit >= 0 ? 'positive' : 'negative';
+    const displayName = getStockDisplayName(stock.symbol);
+    const showCode = displayName !== stock.symbol;
     
     return `
       <div class="stock-rank-item">
         <div class="rank-number ${rankClass}">${index + 1}</div>
         <div class="stock-rank-info">
-          <div class="stock-rank-symbol">${stock.symbol}</div>
-          <div class="stock-rank-trades">${stock.tradeCount}次交易</div>
+          <div class="stock-rank-symbol">${displayName}</div>
+          <div class="stock-rank-trades">${showCode ? `${stock.symbol} · ` : ''}${stock.tradeCount}次交易</div>
         </div>
         <div class="stock-rank-profit ${profitClass}">${formatMoney(stock.profit)}</div>
       </div>
@@ -807,11 +914,145 @@ function updateBestWorstDays() {
   }
 }
 
+// ===== Dividend Page =====
+function openDividendPage() {
+  $('#mainPage').hidden = true;
+  $('#dividendPage').hidden = false;
+  updateDividendPage();
+}
+
+function closeDividendPage() {
+  $('#dividendPage').hidden = true;
+  $('#mainPage').hidden = false;
+}
+
+function calculateDividend(profit) {
+  const ratio = 1 / dividendRatio;
+  
+  if (profit >= 0) {
+    // Profit: dividend = profit * ratio * 80% (after tax)
+    return profit * ratio * 0.8;
+  } else {
+    // Loss: share = loss * ratio * 100%
+    return profit * ratio;
+  }
+}
+
+function updateDividendPage() {
+  updateRatioPreview();
+  updateTodayDividend();
+  updateDividendHistory();
+  updateDividendSummary();
+}
+
+function updateRatioPreview() {
+  const ratio = 1 / dividendRatio;
+  const percentage = (ratio * 100).toFixed(2);
+  $('#ratioPreview').textContent = `${percentage}%`;
+}
+
+function updateTodayDividend() {
+  const container = $('#todayDividend');
+  const today = todayStr();
+  const todayDay = DAYS.find(d => d.date === today && d.status === 'open');
+  
+  if (!todayDay) {
+    container.innerHTML = `
+      <div class="dividend-empty">
+        <div class="empty-icon">📅</div>
+        <div class="empty-title">今日暂无交易记录</div>
+      </div>
+    `;
+    return;
+  }
+  
+  const profit = todayDay.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+  const dividend = calculateDividend(profit);
+  
+  const dateInfo = formatDate(today);
+  const amountClass = dividend > 0 ? 'positive' : (dividend < 0 ? 'negative' : 'zero');
+  
+  container.innerHTML = `
+    <div class="dividend-today-card">
+      <div class="dividend-today-date">${dateInfo.year}年${dateInfo.month}${dateInfo.day}日</div>
+      <div class="dividend-today-profit">今日收益: ${formatMoney(profit)}</div>
+      <div class="dividend-today-amount ${amountClass}">${formatMoney(dividend)}</div>
+    </div>
+  `;
+}
+
+function updateDividendHistory() {
+  const container = $('#dividendHistory');
+  
+  // Get all open days with profit, sorted by date (newest first)
+  const openDays = DAYS
+    .filter(d => d.status === 'open')
+    .map(day => {
+      const profit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+      const dividend = calculateDividend(profit);
+      return { ...day, profit, dividend };
+    })
+    .filter(d => d.profit !== 0)
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, 10); // Show last 10 records
+  
+  if (openDays.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">🎁</div>
+        <div class="empty-title">暂无分红记录</div>
+      </div>
+    `;
+    return;
+  }
+  
+  container.innerHTML = openDays.map(day => {
+    const dateInfo = formatDate(day.date);
+    const amountClass = day.dividend >= 0 ? 'positive' : 'negative';
+    
+    return `
+      <div class="dividend-history-item">
+        <div>
+          <div class="dividend-history-date">${dateInfo.month}${dateInfo.day}日</div>
+          <div class="dividend-history-profit">收益: ${formatMoney(day.profit)}</div>
+        </div>
+        <div class="dividend-history-amount ${amountClass}">${formatMoney(day.dividend)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateDividendSummary() {
+  let totalDividend = 0;
+  let totalLossShare = 0;
+  
+  DAYS.forEach(day => {
+    if (day.status !== 'open') return;
+    const profit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+    const dividend = calculateDividend(profit);
+    
+    if (dividend >= 0) {
+      totalDividend += dividend;
+    } else {
+      totalLossShare += Math.abs(dividend);
+    }
+  });
+  
+  const netDividend = totalDividend - totalLossShare;
+  
+  $('#totalDividend').textContent = formatMoneyShort(totalDividend);
+  $('#totalLossShare').textContent = formatMoneyShort(totalLossShare);
+  
+  const netEl = $('#netDividend');
+  netEl.textContent = formatMoney(netDividend);
+  netEl.style.color = netDividend >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)';
+}
+
 // ===== Export/Import =====
 function getExportData() {
   return {
     exportedAt: new Date().toISOString(),
-    version: '2.0',
+    version: '2.1',
     days: DAYS
   };
 }
@@ -823,7 +1064,7 @@ function exportData() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `tradediary-backup-${todayStr()}.json`;
+  a.download = `甜饼工坊-backup-${todayStr()}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -892,7 +1133,7 @@ async function importData(file) {
     
     alert('导入成功！');
     closeSettings();
-    await refresh();
+  await refresh();
   } catch (err) {
     alert('导入失败：' + (err.message || err));
   }
@@ -945,6 +1186,19 @@ function bindEvents() {
   // Analysis button
   $('#btnAnalysis').addEventListener('click', openAnalysisPage);
   $('#btnBackFromAnalysis').addEventListener('click', closeAnalysisPage);
+  
+  // Dividend button
+  $('#btnDividend').addEventListener('click', openDividendPage);
+  $('#btnBackFromDividend').addEventListener('click', closeDividendPage);
+  
+  // Dividend ratio input
+  $('#dividendRatio').addEventListener('input', (e) => {
+    const value = parseInt(e.target.value);
+    if (value >= 1) {
+      dividendRatio = value;
+      updateDividendPage();
+    }
+  });
   
   // Sheet close buttons
   $('#btnCloseSheet').addEventListener('click', closeDaySheet);
@@ -1011,14 +1265,32 @@ function bindEvents() {
     if (confirm('确定要删除这条记录吗？')) {
       await deleteDay(currentEditDay.id);
       closeDaySheet();
-      await refresh();
+  await refresh();
     }
   });
   
   // Month filter
   $('#monthFilter').addEventListener('change', (e) => {
     currentFilter = e.target.value;
+    currentPage = 1; // Reset to first page when filter changes
     renderRecords();
+  });
+  
+  // Pagination
+  $('#btnPrevPage').addEventListener('click', () => {
+    if (currentPage > 1) {
+      currentPage--;
+      renderRecords();
+    }
+  });
+  
+  $('#btnNextPage').addEventListener('click', () => {
+    const filteredDays = getFilteredDays();
+    const totalPages = Math.ceil(filteredDays.length / RECORDS_PER_PAGE);
+    if (currentPage < totalPages) {
+      currentPage++;
+      renderRecords();
+    }
   });
   
   // Chart tabs
@@ -1062,7 +1334,7 @@ function bindEvents() {
     if (confirm('确定要清空所有数据吗？此操作不可撤销！')) {
       await clearAllDays();
       closeSettings();
-      await refresh();
+    await refresh();
     }
   });
   
@@ -1081,6 +1353,9 @@ function bindEvents() {
 
 // ===== Initialize =====
 async function init() {
+  // Load company data first
+  await loadCompanyData();
+  
   initChart();
   bindEvents();
   await refresh();

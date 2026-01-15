@@ -1,11 +1,12 @@
-/* TradeDiary Service Worker */
-const CACHE_NAME = 'tradediary-v2';
+/* 甜饼工坊 Service Worker */
+const CACHE_NAME = 'cookie-workshop-v2.2';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
-  './manifest.webmanifest'
+  './manifest.webmanifest',
+  './companies_tse.json'
 ];
 
 // Install event - cache assets

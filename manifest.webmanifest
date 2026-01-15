@@ -1,12 +1,12 @@
 {
-  "name": "TradeDiary · 交易日记",
-  "short_name": "TradeDiary",
+  "name": "甜饼工坊 · 交易日记",
+  "short_name": "甜饼工坊",
   "description": "简洁美观的每日交易记录工具，本地保存，离线可用",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#0a0f1a",
-  "theme_color": "#0a0f1a",
+  "background_color": "#0f0d0a",
+  "theme_color": "#0f0d0a",
   "orientation": "portrait",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
