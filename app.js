@@ -473,20 +473,13 @@ function renderRecords() {
     pagination.hidden = false;
     $('#paginationInfo').textContent = `${currentPage} / ${totalPages}`;
     
-    // Use removeAttribute/setAttribute for more reliable disabled state
-    if (currentPage <= 1) {
-      prevBtn.setAttribute('disabled', 'disabled');
-    } else {
-      prevBtn.removeAttribute('disabled');
-    }
-    
-    if (currentPage >= totalPages) {
-      nextBtn.setAttribute('disabled', 'disabled');
-    } else {
-      nextBtn.removeAttribute('disabled');
-    }
+    // Use disabled property for better cross-browser compatibility
+    prevBtn.disabled = currentPage <= 1;
+    nextBtn.disabled = currentPage >= totalPages;
   } else {
     pagination.hidden = true;
+    prevBtn.disabled = true;
+    nextBtn.disabled = true;
   }
   
   // Bind click events
@@ -1284,34 +1277,49 @@ function bindEvents() {
   });
   
   // Month filter
-  $('#monthFilter').addEventListener('change', (e) => {
+  const monthFilterEl = $('#monthFilter');
+  monthFilterEl.addEventListener('change', (e) => {
     currentFilter = e.target.value;
     currentPage = 1; // Reset to first page when filter changes
     renderRecords();
   });
+  // Also handle input event for better Safari compatibility
+  monthFilterEl.addEventListener('input', (e) => {
+    currentFilter = e.target.value;
+    currentPage = 1;
+    renderRecords();
+  });
   
-  // Pagination
-  $('#btnPrevPage').addEventListener('click', (e) => {
+  // Pagination - use both click and touchend for better mobile support
+  const prevBtn = $('#btnPrevPage');
+  const nextBtn = $('#btnNextPage');
+  
+  const handlePrevPage = (e) => {
     e.preventDefault();
+    e.stopPropagation();
+    if (prevBtn.disabled) return;
     if (currentPage > 1) {
       currentPage--;
       renderRecords();
-      // Scroll to top of records
       $('#recordsList').scrollTop = 0;
     }
-  });
+  };
   
-  $('#btnNextPage').addEventListener('click', (e) => {
+  const handleNextPage = (e) => {
     e.preventDefault();
+    e.stopPropagation();
+    if (nextBtn.disabled) return;
     const filteredDays = getFilteredDays();
     const totalPages = Math.ceil(filteredDays.length / RECORDS_PER_PAGE);
     if (currentPage < totalPages) {
       currentPage++;
       renderRecords();
-      // Scroll to top of records
       $('#recordsList').scrollTop = 0;
     }
-  });
+  };
+  
+  prevBtn.addEventListener('click', handlePrevPage);
+  nextBtn.addEventListener('click', handleNextPage);
   
   // Chart tabs
   $$('.chart-tab').forEach(tab => {
