@@ -347,7 +347,7 @@
       <div class="sheet-header">
         <div>
           <h3 class="sheet-title" id="sheetTitle">添加记录</h3>
-          <p class="sheet-subtitle" id="sheetSubtitle">选择日期和市场状态</p>
+          <p class="sheet-subtitle" id="sheetSubtitle">选择日期并输入交易明细</p>
         </div>
         <button class="icon-btn small" id="btnCloseSheet">✕</button>
       </div>
@@ -359,27 +359,8 @@
           <input type="date" id="fDate" class="form-input date-input" />
         </div>
 
-        <!-- Market Status -->
-        <div class="form-group" id="statusGroup">
-          <label class="form-label">市场状态</label>
-          <div class="status-selector">
-            <button type="button" class="status-btn" data-status="open">
-              <span class="status-icon">📈</span>
-              <span>开盘</span>
-            </button>
-            <button type="button" class="status-btn" data-status="holiday">
-              <span class="status-icon">🎌</span>
-              <span>祝日</span>
-            </button>
-            <button type="button" class="status-btn" data-status="closed">
-              <span class="status-icon">🌙</span>
-              <span>休日</span>
-            </button>
-          </div>
-          <input type="hidden" id="fStatus" value="" />
-        </div>
 
-        <!-- Trades Section (only shown when market is open) -->
+        <!-- Trades Section -->
         <div class="trades-section" id="tradesSection" hidden>
           <div class="form-group">
             <label class="form-label">交易明细</label>

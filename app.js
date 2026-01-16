@@ -200,7 +200,6 @@ function calculateHoldings(upToDate = null) {
   
   // Sort days by date
   const sortedDays = [...DAYS]
-    .filter(d => d.status === 'open')
     .sort((a, b) => new Date(a.date) - new Date(b.date));
   
   for (const day of sortedDays) {
@@ -297,7 +296,7 @@ function calculateTradeProfit(trade, holdingsBeforeTrade) {
 // Calculate daily profit for a day
 // Logic: Process all buys first, then sells (for same-day trading / day trading)
 function calculateDayProfit(day) {
-  if (day.status !== 'open' || !day.trades) return 0;
+  if (!day.trades) return 0;
   
   // Get holdings before this day
   const holdingsBeforeDay = calculateHoldings(
@@ -449,7 +448,6 @@ function updateChart(range = 'week') {
   if (!profitChart) return;
   
   const openDays = DAYS
-    .filter(d => d.status === 'open')
     .sort((a, b) => new Date(a.date) - new Date(b.date));
   
   let filteredDays = openDays;
@@ -498,7 +496,7 @@ function updateChart(range = 'week') {
 
 // ===== Summary Stats =====
 function updateSummary() {
-  const openDays = DAYS.filter(d => d.status === 'open');
+  const openDays = DAYS;
   
   let totalProfit = 0;
   let winDays = 0;
@@ -588,29 +586,11 @@ function renderRecords() {
   
   list.innerHTML = pageDays.map(day => {
     const dateInfo = formatDate(day.date);
-    let statusClass = day.status;
-    let statusText = '';
-    let statusIcon = '';
-    
-    switch (day.status) {
-      case 'open':
-        statusText = '开盘';
-        statusIcon = '📈';
-        break;
-      case 'holiday':
-        statusText = '祝日';
-        statusIcon = '🎌';
-        break;
-      case 'closed':
-        statusText = '休日';
-        statusIcon = '🌙';
-        break;
-    }
     
     let tradesInfo = '';
     let profitHtml = '';
     
-    if (day.status === 'open' && day.trades?.length > 0) {
+    if (day.trades?.length > 0) {
       // Show trade summary
       const buyCount = day.trades.filter(t => t.action === 'buy').length;
       const sellCount = day.trades.filter(t => t.action === 'sell').length;
@@ -625,11 +605,9 @@ function renderRecords() {
       const totalProfit = calculateDayProfit(day);
       const profitClass = totalProfit > 0 ? 'positive' : (totalProfit < 0 ? 'negative' : 'zero');
       profitHtml = `<div class="record-profit ${profitClass}">${formatMoney(totalProfit)}</div>`;
-    } else if (day.status === 'open') {
+    } else {
       tradesInfo = '无交易记录';
       profitHtml = `<div class="record-profit zero">¥0</div>`;
-    } else {
-      tradesInfo = statusText;
     }
     
     return `
@@ -639,10 +617,6 @@ function renderRecords() {
           <div class="month">${dateInfo.month}</div>
         </div>
         <div class="record-info">
-          <div class="record-status ${statusClass}">
-            <span>${statusIcon}</span>
-            <span>${statusText}</span>
-        </div>
           <div class="record-trades">${tradesInfo}</div>
         </div>
         ${profitHtml}
@@ -682,7 +656,6 @@ function openDaySheet(mode, day = null) {
   const title = $('#sheetTitle');
   const subtitle = $('#sheetSubtitle');
   const deleteBtn = $('#btnDeleteDay');
-  const statusGroup = $('#statusGroup');
   
   currentEditDay = day;
   tradeEntries = [];
@@ -694,36 +667,21 @@ function openDaySheet(mode, day = null) {
     deleteBtn.hidden = true;
     $('#fDayId').value = '';
     $('#fDate').value = todayStr();
-    $('#fStatus').value = 'open';
-    // 隐藏状态选择器
-    if (statusGroup) {
-      statusGroup.hidden = true;
-    }
     // 直接显示交易输入界面
     $('#tradesSection').hidden = false;
     tradeEntries = [createEmptyTrade()];
     renderTradeEntries();
   } else {
     title.textContent = '查看记录';
-    subtitle.textContent = '选择日期和市场状态';
+    subtitle.textContent = '选择日期并输入交易明细';
     deleteBtn.hidden = false;
     $('#fDayId').value = day.id;
     $('#fDate').value = day.date;
-    $('#fStatus').value = day.status;
-    // 编辑模式下显示状态选择器
-    if (statusGroup) {
-      statusGroup.hidden = false;
-    }
-    setStatusSelection(day.status);
-    
-    if (day.status === 'open') {
-      $('#tradesSection').hidden = false;
-      tradeEntries = day.trades?.map(t => ({ ...t, isExisting: true })) || [];
-      if (tradeEntries.length === 0) {
-        tradeEntries.push(createEmptyTrade());
-      }
-    } else {
-      $('#tradesSection').hidden = true;
+    // 编辑模式下也直接显示交易输入界面
+    $('#tradesSection').hidden = false;
+    tradeEntries = day.trades?.map(t => ({ ...t, isExisting: true })) || [];
+    if (tradeEntries.length === 0) {
+      tradeEntries.push(createEmptyTrade());
     }
     renderTradeEntries();
   }
@@ -747,22 +705,6 @@ function closeDaySheet() {
   tradeEntries = [];
 }
 
-function setStatusSelection(status) {
-  $$('.status-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.status === status);
-  });
-  $('#fStatus').value = status;
-  
-  if (status === 'open') {
-    $('#tradesSection').hidden = false;
-    if (tradeEntries.length === 0) {
-      tradeEntries.push(createEmptyTrade());
-    }
-    renderTradeEntries();
-  } else {
-    $('#tradesSection').hidden = true;
-  }
-}
 
 function renderTradeEntries() {
   const container = $('#tradesListForm');
@@ -1030,7 +972,7 @@ function updateAnalysisPage() {
 }
 
 function updateAnalysisSummary() {
-  const openDays = DAYS.filter(d => d.status === 'open');
+  const openDays = DAYS;
   
   let totalProfit = 0;
   let winDays = 0;
@@ -1127,7 +1069,7 @@ function updateStockRanking() {
   const stockMap = new Map();
   
   DAYS.forEach(day => {
-    if (day.status !== 'open' || !day.trades) return;
+    if (!day.trades) return;
     
     // Get holdings before this day
     const holdingsBeforeDay = calculateHoldings(
@@ -1271,7 +1213,6 @@ function updateTradingStats() {
   let tradingDays = 0;
   
   DAYS.forEach(day => {
-    if (day.status !== 'open') return;
     
     const hasTrades = day.trades && day.trades.length > 0;
     if (hasTrades) tradingDays++;
@@ -1300,7 +1241,6 @@ function updateMonthlyChart() {
   const monthMap = new Map();
   
   DAYS.forEach(day => {
-    if (day.status !== 'open') return;
     const date = new Date(day.date);
     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
     
@@ -1386,7 +1326,7 @@ function updateMonthlyChart() {
 function updateBestWorstDays() {
   const container = $('#bestWorstDays');
   
-  const openDays = DAYS.filter(d => d.status === 'open');
+  const openDays = DAYS;
   
   if (openDays.length === 0) {
     container.innerHTML = `
@@ -1480,7 +1420,7 @@ function updateDividendPage() {
 function updateTodayDividend() {
   const container = $('#todayDividend');
   const today = todayStr();
-  const todayDay = DAYS.find(d => d.date === today && d.status === 'open');
+  const todayDay = DAYS.find(d => d.date === today);
   
   if (!todayDay) {
     container.innerHTML = `
@@ -1511,7 +1451,6 @@ function updateDividendHistory() {
   const container = $('#dividendHistory');
   
   const openDays = DAYS
-    .filter(d => d.status === 'open')
     .map(day => {
       const profit = calculateDayProfit(day);
       const dividend = calculateDividend(profit);
@@ -1552,7 +1491,6 @@ function updateDividendSummary() {
   let totalLossShare = 0;
   
   DAYS.forEach(day => {
-    if (day.status !== 'open') return;
     const profit = calculateDayProfit(day);
     const dividend = calculateDividend(profit);
     
@@ -1670,7 +1608,7 @@ async function importDataFromText(text) {
       await saveDay({
         id: day.id,
         date: day.date,
-        status: day.status || 'open',
+        status: 'open', // 固定为 'open'
         trades: trades,
         updatedAt: new Date().toISOString()
       });
@@ -1810,12 +1748,6 @@ function bindEvents() {
   $('#btnCancelSheet').addEventListener('click', closeDaySheet);
   $('#daySheetBackdrop').addEventListener('click', closeDaySheet);
   
-  // Status selection
-  $$('.status-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      setStatusSelection(btn.dataset.status);
-    });
-  });
   
   // Add trade button
   $('#btnAddTrade').addEventListener('click', () => {
@@ -1829,16 +1761,11 @@ function bindEvents() {
     
     const id = $('#fDayId').value || generateId();
     const date = $('#fDate').value;
-    const status = $('#fStatus').value;
+    const status = 'open'; // 固定为 'open'
     
     if (!date) {
       alert('请选择日期');
       return;
-    }
-    
-    // 添加模式下默认使用 'open' 状态
-    if (!status) {
-      status = 'open';
     }
     
     // Check if date already exists (for new entries)
@@ -1851,17 +1778,15 @@ function bindEvents() {
     }
     
     // Filter valid trades and remove isExisting flag
-    const validTrades = status === 'open' 
-      ? tradeEntries
-          .filter(t => t.symbol && t.quantity && t.price)
-          .map(t => ({
-            symbol: t.symbol,
-            action: t.action,
-            market: t.market,
-            quantity: t.quantity,
-            price: t.price
-          }))
-      : [];
+    const validTrades = tradeEntries
+      .filter(t => t.symbol && t.quantity && t.price)
+      .map(t => ({
+        symbol: t.symbol,
+        action: t.action,
+        market: t.market,
+        quantity: t.quantity,
+        price: t.price
+      }));
     
     const day = {
       id,
@@ -2168,7 +2093,7 @@ function generateTradeDataPrompt() {
   
   // Get all trade history
   const tradeHistory = DAYS
-    .filter(d => d.status === 'open' && d.trades?.length > 0)
+    .filter(d => d.trades?.length > 0)
     .sort((a, b) => new Date(a.date) - new Date(b.date))
     .map(day => ({
       date: day.date,
