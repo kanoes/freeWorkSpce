@@ -654,12 +654,26 @@ body::before {
 }
 
 /* Holdings List */
+.holdings-container,
+.stock-ranking-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .holdings-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 300px;
-  overflow-y: auto;
+}
+
+.list-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
 }
 
 .holding-item {
@@ -1348,6 +1362,75 @@ body::before {
   font-size: 16px;
   cursor: pointer;
   flex-shrink: 0;
+}
+
+/* Existing trade entry (read-only) */
+.trade-entry.existing {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+}
+
+.trade-display-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trade-symbol {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.trade-company-name {
+  font-size: 12px;
+  color: var(--accent-primary);
+}
+
+.trade-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trade-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.trade-tag.buy {
+  background: var(--accent-success-glow);
+  color: var(--accent-success);
+}
+
+.trade-tag.sell {
+  background: var(--accent-danger-glow);
+  color: var(--accent-danger);
+}
+
+.trade-tag.market {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.trade-info {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.trade-entry.existing .remove-trade-btn {
+  opacity: 0.7;
+}
+
+.trade-entry.existing .remove-trade-btn:hover {
+  opacity: 1;
 }
 
 .add-trade-btn {

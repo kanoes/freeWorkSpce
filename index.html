@@ -175,10 +175,17 @@
         <div class="card-header">
           <h2>📦 当前持仓</h2>
         </div>
-        <div class="holdings-list" id="holdingsList">
-          <div class="empty-state">
-            <div class="empty-icon">📦</div>
-            <div class="empty-title">暂无持仓</div>
+        <div class="holdings-container">
+          <div class="holdings-list" id="holdingsList">
+            <div class="empty-state">
+              <div class="empty-icon">📦</div>
+              <div class="empty-title">暂无持仓</div>
+            </div>
+          </div>
+          <div class="list-pagination" id="holdingsPagination" hidden>
+            <button class="pagination-btn" id="btnHoldingsPrev" disabled>‹ 上一页</button>
+            <span class="pagination-info" id="holdingsPaginationInfo">1 / 1</span>
+            <button class="pagination-btn" id="btnHoldingsNext" disabled>下一页 ›</button>
           </div>
         </div>
       </section>
@@ -188,11 +195,18 @@
         <div class="card-header">
           <h2>📊 股票损益排行</h2>
         </div>
-        <div class="stock-ranking" id="stockRanking">
-          <div class="empty-state">
-            <div class="empty-icon">📈</div>
-            <div class="empty-title">暂无数据</div>
-            <div class="empty-desc">开始记录交易后这里会显示排行</div>
+        <div class="stock-ranking-container">
+          <div class="stock-ranking" id="stockRanking">
+            <div class="empty-state">
+              <div class="empty-icon">📈</div>
+              <div class="empty-title">暂无数据</div>
+              <div class="empty-desc">开始记录交易后这里会显示排行</div>
+            </div>
+          </div>
+          <div class="list-pagination" id="stockRankingPagination" hidden>
+            <button class="pagination-btn" id="btnStockRankingPrev" disabled>‹ 上一页</button>
+            <span class="pagination-info" id="stockRankingPaginationInfo">1 / 1</span>
+            <button class="pagination-btn" id="btnStockRankingNext" disabled>下一页 ›</button>
           </div>
         </div>
       </section>

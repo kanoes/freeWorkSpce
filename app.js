@@ -174,9 +174,17 @@ let monthlyChart = null;
 let currentPage = 1;
 const RECORDS_PER_PAGE = 7;
 
+// Analysis page pagination
+let holdingsPage = 1;
+let stockRankingPage = 1;
+const ITEMS_PER_PAGE = 5;
+
 // Dividend settings
 let dividendNumerator = 1;
 let dividendDenominator = 3;
+
+// Edit mode flag
+let isEditMode = false;
 
 // ===== Holdings Management =====
 // Calculate holdings based on all trades up to a specific date
@@ -670,6 +678,7 @@ function openDaySheet(mode, day = null) {
   
   currentEditDay = day;
   tradeEntries = [];
+  isEditMode = (mode === 'edit');
   
   if (mode === 'add') {
     title.textContent = '添加记录';
@@ -681,7 +690,7 @@ function openDaySheet(mode, day = null) {
     $('#tradesSection').hidden = true;
     renderTradeEntries();
   } else {
-    title.textContent = '编辑记录';
+    title.textContent = '查看记录';
     deleteBtn.hidden = false;
     $('#fDayId').value = day.id;
     $('#fDate').value = day.date;
@@ -690,7 +699,7 @@ function openDaySheet(mode, day = null) {
     
     if (day.status === 'open') {
       $('#tradesSection').hidden = false;
-      tradeEntries = day.trades?.map(t => ({ ...t })) || [];
+      tradeEntries = day.trades?.map(t => ({ ...t, isExisting: true })) || [];
       if (tradeEntries.length === 0) {
         tradeEntries.push(createEmptyTrade());
       }
@@ -742,7 +751,38 @@ function renderTradeEntries() {
   container.innerHTML = tradeEntries.map((trade, index) => {
     const companyName = trade.symbol ? getCompanyName(trade.symbol) : '';
     const showCompanyName = companyName && companyName !== trade.symbol;
+    const isExisting = trade.isExisting === true;
+    const readonlyAttr = isExisting ? 'readonly disabled' : '';
+    const disabledClass = isExisting ? 'disabled' : '';
     
+    // For existing trades, show as read-only display
+    if (isExisting) {
+      const actionText = trade.action === 'buy' ? '买入' : '卖出';
+      const marketText = trade.market === 'pts' ? 'PTS' : '东证';
+      const actionClass = trade.action === 'buy' ? 'buy' : 'sell';
+      
+      return `
+        <div class="trade-entry existing" data-index="${index}">
+          <div class="trade-row">
+            <div class="trade-display-group">
+              <span class="trade-symbol">${trade.symbol}</span>
+              <span class="trade-company-name">${showCompanyName ? companyName : ''}</span>
+            </div>
+            <button type="button" class="remove-trade-btn existing-remove">×</button>
+          </div>
+          <div class="trade-row trade-details">
+            <span class="trade-tag ${actionClass}">${actionText}</span>
+            <span class="trade-tag market">${marketText}</span>
+            <span class="trade-info">${trade.quantity}股 × ¥${trade.price}</span>
+          </div>
+          <div class="trade-amount">
+            金额: ${formatMoneyShort((Number(trade.quantity) || 0) * (Number(trade.price) || 0))}
+          </div>
+        </div>
+      `;
+    }
+    
+    // For new trades, show editable form
     return `
       <div class="trade-entry" data-index="${index}">
         <div class="trade-row">
@@ -756,7 +796,7 @@ function renderTradeEntries() {
               ${showCompanyName ? companyName : ''}
             </div>
           </div>
-          <button type="button" class="remove-trade-btn" ${tradeEntries.length <= 1 ? 'style="visibility:hidden"' : ''}>×</button>
+          <button type="button" class="remove-trade-btn" ${tradeEntries.length <= 1 && !isEditMode ? 'style="visibility:hidden"' : ''}>×</button>
         </div>
         <div class="trade-row">
           <div class="trade-select-group">
@@ -792,8 +832,8 @@ function renderTradeEntries() {
     `;
   }).join('');
   
-  // Bind input events
-  container.querySelectorAll('.form-input, .form-select').forEach(input => {
+  // Bind input events for new (editable) entries only
+  container.querySelectorAll('.trade-entry:not(.existing) .form-input, .trade-entry:not(.existing) .form-select').forEach(input => {
     input.addEventListener('input', (e) => {
       const entry = e.target.closest('.trade-entry');
       const index = parseInt(entry.dataset.index);
@@ -835,14 +875,31 @@ function renderTradeEntries() {
     });
   });
   
-  // Bind remove buttons
-  container.querySelectorAll('.remove-trade-btn').forEach(btn => {
+  // Bind remove buttons for new entries
+  container.querySelectorAll('.trade-entry:not(.existing) .remove-trade-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const entry = e.target.closest('.trade-entry');
       const index = parseInt(entry.dataset.index);
       tradeEntries.splice(index, 1);
       renderTradeEntries();
       updateDailyTotal();
+    });
+  });
+  
+  // Bind remove buttons for existing entries (with confirmation)
+  container.querySelectorAll('.trade-entry.existing .remove-trade-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const entry = e.target.closest('.trade-entry');
+      const index = parseInt(entry.dataset.index);
+      const trade = tradeEntries[index];
+      const companyName = getCompanyName(trade.symbol) || trade.symbol;
+      const actionText = trade.action === 'buy' ? '买入' : '卖出';
+      
+      if (confirm(`确定要删除这条交易记录吗？\n\n${companyName} ${actionText} ${trade.quantity}股 × ¥${trade.price}`)) {
+        tradeEntries.splice(index, 1);
+        renderTradeEntries();
+        updateDailyTotal();
+      }
     });
   });
   
@@ -984,6 +1041,7 @@ function updateAnalysisSummary() {
 
 function updateHoldingsList() {
   const container = $('#holdingsList');
+  const pagination = $('#holdingsPagination');
   const holdings = calculateHoldings();
   
   if (holdings.size === 0) {
@@ -993,6 +1051,7 @@ function updateHoldingsList() {
         <div class="empty-title">暂无持仓</div>
       </div>
     `;
+    if (pagination) pagination.hidden = true;
     return;
   }
   
@@ -1000,7 +1059,15 @@ function updateHoldingsList() {
     .map(([symbol, data]) => ({ symbol, ...data }))
     .sort((a, b) => (b.quantity * b.avgPrice) - (a.quantity * a.avgPrice));
   
-  container.innerHTML = holdingsArray.map(holding => {
+  const totalPages = Math.ceil(holdingsArray.length / ITEMS_PER_PAGE);
+  if (holdingsPage > totalPages) holdingsPage = totalPages;
+  if (holdingsPage < 1) holdingsPage = 1;
+  
+  const startIndex = (holdingsPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const pageItems = holdingsArray.slice(startIndex, endIndex);
+  
+  container.innerHTML = pageItems.map(holding => {
     const displayName = getStockDisplayName(holding.symbol);
     const totalValue = holding.quantity * holding.avgPrice;
     const marketLabel = holding.market === 'pts' ? 'PTS' : '东证';
@@ -1019,6 +1086,18 @@ function updateHoldingsList() {
       </div>
     `;
   }).join('');
+  
+  // Update pagination
+  if (pagination) {
+    if (totalPages > 1) {
+      pagination.hidden = false;
+      $('#holdingsPaginationInfo').textContent = `${holdingsPage} / ${totalPages}`;
+      $('#btnHoldingsPrev').disabled = holdingsPage <= 1;
+      $('#btnHoldingsNext').disabled = holdingsPage >= totalPages;
+    } else {
+      pagination.hidden = true;
+    }
+  }
 }
 
 function updateStockRanking() {
@@ -1109,6 +1188,8 @@ function updateStockRanking() {
     .filter(s => s.sellCount > 0) // Only show stocks with realized profits
     .sort((a, b) => b.profit - a.profit);
   
+  const pagination = $('#stockRankingPagination');
+  
   if (stocks.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
@@ -1117,14 +1198,24 @@ function updateStockRanking() {
         <div class="empty-desc">开始记录交易后这里会显示排行</div>
       </div>
     `;
+    if (pagination) pagination.hidden = true;
     return;
   }
   
-  container.innerHTML = stocks.map((stock, index) => {
+  const totalPages = Math.ceil(stocks.length / ITEMS_PER_PAGE);
+  if (stockRankingPage > totalPages) stockRankingPage = totalPages;
+  if (stockRankingPage < 1) stockRankingPage = 1;
+  
+  const startIndex = (stockRankingPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const pageStocks = stocks.slice(startIndex, endIndex);
+  
+  container.innerHTML = pageStocks.map((stock, pageIndex) => {
+    const actualIndex = startIndex + pageIndex;
     let rankClass = '';
-    if (index === 0) rankClass = 'gold';
-    else if (index === 1) rankClass = 'silver';
-    else if (index === 2) rankClass = 'bronze';
+    if (actualIndex === 0) rankClass = 'gold';
+    else if (actualIndex === 1) rankClass = 'silver';
+    else if (actualIndex === 2) rankClass = 'bronze';
     
     const profitClass = stock.profit >= 0 ? 'positive' : 'negative';
     const displayName = getStockDisplayName(stock.symbol);
@@ -1132,7 +1223,7 @@ function updateStockRanking() {
     
     return `
       <div class="stock-rank-item">
-        <div class="rank-number ${rankClass}">${index + 1}</div>
+        <div class="rank-number ${rankClass}">${actualIndex + 1}</div>
         <div class="stock-rank-info">
           <div class="stock-rank-symbol">${displayName}</div>
           <div class="stock-rank-trades">${showCode ? `${stock.symbol} · ` : ''}买${stock.buyCount}/卖${stock.sellCount}</div>
@@ -1141,6 +1232,18 @@ function updateStockRanking() {
       </div>
     `;
   }).join('');
+  
+  // Update pagination
+  if (pagination) {
+    if (totalPages > 1) {
+      pagination.hidden = false;
+      $('#stockRankingPaginationInfo').textContent = `${stockRankingPage} / ${totalPages}`;
+      $('#btnStockRankingPrev').disabled = stockRankingPage <= 1;
+      $('#btnStockRankingNext').disabled = stockRankingPage >= totalPages;
+    } else {
+      pagination.hidden = true;
+    }
+  }
 }
 
 function updateTradingStats() {
@@ -1687,9 +1790,17 @@ function bindEvents() {
       }
     }
     
-    // Filter valid trades
+    // Filter valid trades and remove isExisting flag
     const validTrades = status === 'open' 
-      ? tradeEntries.filter(t => t.symbol && t.quantity && t.price)
+      ? tradeEntries
+          .filter(t => t.symbol && t.quantity && t.price)
+          .map(t => ({
+            symbol: t.symbol,
+            action: t.action,
+            market: t.market,
+            quantity: t.quantity,
+            price: t.price
+          }))
       : [];
     
     const day = {
@@ -1794,6 +1905,46 @@ function bindEvents() {
       await refresh();
     }
   });
+  
+  // Holdings pagination
+  const btnHoldingsPrev = $('#btnHoldingsPrev');
+  const btnHoldingsNext = $('#btnHoldingsNext');
+  
+  if (btnHoldingsPrev) {
+    btnHoldingsPrev.addEventListener('click', () => {
+      if (holdingsPage > 1) {
+        holdingsPage--;
+        updateHoldingsList();
+      }
+    });
+  }
+  
+  if (btnHoldingsNext) {
+    btnHoldingsNext.addEventListener('click', () => {
+      holdingsPage++;
+      updateHoldingsList();
+    });
+  }
+  
+  // Stock ranking pagination
+  const btnStockRankingPrev = $('#btnStockRankingPrev');
+  const btnStockRankingNext = $('#btnStockRankingNext');
+  
+  if (btnStockRankingPrev) {
+    btnStockRankingPrev.addEventListener('click', () => {
+      if (stockRankingPage > 1) {
+        stockRankingPage--;
+        updateStockRanking();
+      }
+    });
+  }
+  
+  if (btnStockRankingNext) {
+    btnStockRankingNext.addEventListener('click', () => {
+      stockRankingPage++;
+      updateStockRanking();
+    });
+  }
   
   // Theme change listener
   const mql = window.matchMedia('(prefers-color-scheme: dark)');
