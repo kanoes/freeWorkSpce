@@ -403,16 +403,6 @@ body::before {
   border-color: var(--accent-primary);
 }
 
-.feature-btn.ai-btn {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(59, 130, 246, 0.1));
-  border-color: rgba(139, 92, 246, 0.3);
-}
-
-.feature-btn.ai-btn:hover {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(59, 130, 246, 0.2));
-  border-color: rgba(139, 92, 246, 0.5);
-}
-
 .feature-icon {
   font-size: 22px;
 }

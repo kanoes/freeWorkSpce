@@ -1953,6 +1953,14 @@ function bindEvents() {
     }
   });
   
+  // Clear chat history
+  $('#btnClearChatHistory').addEventListener('click', () => {
+    if (confirm('确定要清除所有聊天历史吗？')) {
+      clearChatHistory();
+      alert('聊天历史已清除');
+    }
+  });
+  
   // Holdings pagination
   const btnHoldingsPrev = $('#btnHoldingsPrev');
   const btnHoldingsNext = $('#btnHoldingsNext');
@@ -2021,6 +2029,7 @@ function openAIPage() {
   
   // Check if API key is set
   if (!openaiApiKey) {
+    $('#chatContainer').innerHTML = '';
     showChatMessage('system', '⚠️ 请先在设置中输入 OpenAI API Key');
     $('#quickActions').hidden = true;
     $('#chatInput').disabled = true;
@@ -2028,14 +2037,65 @@ function openAIPage() {
     return;
   }
   
-  // Reset chat
+  // Load chat history from localStorage
+  const savedHistory = localStorage.getItem('ai_chat_history');
+  const savedMode = localStorage.getItem('ai_chat_mode');
+  
+  if (savedHistory) {
+    try {
+      chatHistory = JSON.parse(savedHistory);
+      currentChatMode = savedMode || null;
+      
+      // Restore chat messages
+      $('#chatContainer').innerHTML = '';
+      chatHistory.forEach(msg => {
+        showChatMessage(msg.role, msg.content);
+      });
+      
+      // Hide quick actions if already started
+      if (currentChatMode) {
+        $('#quickActions').hidden = true;
+      } else {
+        $('#quickActions').hidden = false;
+      }
+    } catch (e) {
+      console.error('Failed to load chat history:', e);
+      chatHistory = [];
+      currentChatMode = null;
+      $('#chatContainer').innerHTML = '';
+      $('#quickActions').hidden = false;
+    }
+  } else {
+    // No saved history, start fresh
+    chatHistory = [];
+    currentChatMode = null;
+    $('#chatContainer').innerHTML = '';
+    $('#quickActions').hidden = false;
+  }
+  
+  $('#chatInput').disabled = false;
+  updateSendButtonState();
+  
+  // Show welcome message only if no history
+  if (chatHistory.length === 0) {
+    showChatMessage('assistant', `你好！我是甜饼工坊的 AI 助手 🍪\n\n我可以帮你分析交易数据，或者回答其他问题。请选择下方的选项开始对话：`);
+  }
+}
+
+function saveChatHistory() {
+  localStorage.setItem('ai_chat_history', JSON.stringify(chatHistory));
+  if (currentChatMode) {
+    localStorage.setItem('ai_chat_mode', currentChatMode);
+  }
+}
+
+function clearChatHistory() {
   chatHistory = [];
   currentChatMode = null;
+  localStorage.removeItem('ai_chat_history');
+  localStorage.removeItem('ai_chat_mode');
   $('#chatContainer').innerHTML = '';
   $('#quickActions').hidden = false;
-  $('#chatInput').disabled = false;
-  
-  // Show welcome message
   showChatMessage('assistant', `你好！我是甜饼工坊的 AI 助手 🍪\n\n我可以帮你分析交易数据，或者回答其他问题。请选择下方的选项开始对话：`);
 }
 
@@ -2181,18 +2241,15 @@ async function sendToOpenAI(userMessage) {
     });
   }
   
-  // Add chat history
+  // Add chat history (user message is already included)
   chatHistory.forEach(msg => {
-    messages.push({
-      role: msg.role,
-      content: msg.content
-    });
-  });
-  
-  // Add current message
-  messages.push({
-    role: 'user',
-    content: userMessage
+    // Skip system messages in history (they're already in the system prompt)
+    if (msg.role !== 'system') {
+      messages.push({
+        role: msg.role,
+        content: msg.content
+      });
+    }
   });
   
   try {
@@ -2226,9 +2283,11 @@ async function sendToOpenAI(userMessage) {
     const data = await response.json();
     const assistantMessage = data.choices[0]?.message?.content || '抱歉，我无法生成回复。';
     
-    // Save to history
-    chatHistory.push({ role: 'user', content: userMessage });
+    // Save assistant message to history
     chatHistory.push({ role: 'assistant', content: assistantMessage });
+    
+    // Persist chat history
+    saveChatHistory();
     
     // Show response
     showChatMessage('assistant', assistantMessage);
@@ -2257,6 +2316,10 @@ function handleSendMessage() {
   
   if (!message || isAILoading) return;
   
+  // Save user message to history immediately
+  chatHistory.push({ role: 'user', content: message });
+  saveChatHistory();
+  
   // Show user message
   showChatMessage('user', message);
   input.value = '';
@@ -2276,6 +2339,15 @@ function startTradeDataChat() {
   currentChatMode = 'trade';
   $('#quickActions').hidden = true;
   
+  // Add system and assistant messages to history
+  chatHistory.push({ role: 'system', content: '📊 已加载交易数据，你可以开始提问了' });
+  chatHistory.push({ 
+    role: 'assistant', 
+    content: '我已经获取了你的交易数据！你可以问我：\n\n• 我的整体交易表现如何？\n• 哪只股票给我带来了最多收益？\n• 分析一下我的交易习惯\n• 我目前的持仓情况怎么样？\n• 有什么改进建议吗？\n\n或者任何其他关于你交易的问题！'
+  });
+  
+  saveChatHistory();
+  
   showChatMessage('system', '📊 已加载交易数据，你可以开始提问了');
   showChatMessage('assistant', '我已经获取了你的交易数据！你可以问我：\n\n• 我的整体交易表现如何？\n• 哪只股票给我带来了最多收益？\n• 分析一下我的交易习惯\n• 我目前的持仓情况怎么样？\n• 有什么改进建议吗？\n\n或者任何其他关于你交易的问题！');
 }
@@ -2288,6 +2360,14 @@ function startGeneralChat() {
   
   currentChatMode = 'general';
   $('#quickActions').hidden = true;
+  
+  // Add assistant message to history
+  chatHistory.push({ 
+    role: 'assistant', 
+    content: '好的，你想聊些什么呢？我可以回答各种问题 😊'
+  });
+  
+  saveChatHistory();
   
   showChatMessage('assistant', '好的，你想聊些什么呢？我可以回答各种问题 😊');
 }
