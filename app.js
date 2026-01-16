@@ -2203,10 +2203,10 @@ async function sendToOpenAI(userMessage) {
         'Authorization': `Bearer ${openaiApiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model: 'gpt-5.2',
         messages: messages,
         temperature: 0.7,
-        max_tokens: 2000
+        max_tokens: 999999
       })
     });
     
