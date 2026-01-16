@@ -680,7 +680,9 @@ let tradeEntries = [];
 function openDaySheet(mode, day = null) {
   const sheet = $('#daySheet');
   const title = $('#sheetTitle');
+  const subtitle = $('#sheetSubtitle');
   const deleteBtn = $('#btnDeleteDay');
+  const statusGroup = $('#statusGroup');
   
   currentEditDay = day;
   tradeEntries = [];
@@ -688,19 +690,30 @@ function openDaySheet(mode, day = null) {
   
   if (mode === 'add') {
     title.textContent = '添加记录';
+    subtitle.textContent = '选择日期并输入交易明细';
     deleteBtn.hidden = true;
     $('#fDayId').value = '';
     $('#fDate').value = todayStr();
-    $('#fStatus').value = '';
-    setStatusSelection('');
-    $('#tradesSection').hidden = true;
+    $('#fStatus').value = 'open';
+    // 隐藏状态选择器
+    if (statusGroup) {
+      statusGroup.hidden = true;
+    }
+    // 直接显示交易输入界面
+    $('#tradesSection').hidden = false;
+    tradeEntries = [createEmptyTrade()];
     renderTradeEntries();
   } else {
     title.textContent = '查看记录';
+    subtitle.textContent = '选择日期和市场状态';
     deleteBtn.hidden = false;
     $('#fDayId').value = day.id;
     $('#fDate').value = day.date;
     $('#fStatus').value = day.status;
+    // 编辑模式下显示状态选择器
+    if (statusGroup) {
+      statusGroup.hidden = false;
+    }
     setStatusSelection(day.status);
     
     if (day.status === 'open') {
@@ -1823,9 +1836,9 @@ function bindEvents() {
       return;
     }
     
+    // 添加模式下默认使用 'open' 状态
     if (!status) {
-      alert('请选择市场状态');
-      return;
+      status = 'open';
     }
     
     // Check if date already exists (for new entries)
