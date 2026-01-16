@@ -180,6 +180,7 @@ let dividendDenominator = 3;
 
 // ===== Holdings Management =====
 // Calculate holdings based on all trades up to a specific date
+// For each day, process buys first then sells (for day trading support)
 function calculateHoldings(upToDate = null) {
   const holdings = new Map(); // symbol -> { quantity, totalCost, avgPrice, market }
   
@@ -193,7 +194,12 @@ function calculateHoldings(upToDate = null) {
     
     if (!day.trades) continue;
     
-    for (const trade of day.trades) {
+    // Separate buys and sells for this day
+    const buys = day.trades.filter(t => t.action === 'buy');
+    const sells = day.trades.filter(t => t.action === 'sell');
+    
+    // Process all buys first
+    for (const trade of buys) {
       if (!trade.symbol || !trade.quantity || !trade.price) continue;
       
       const symbol = trade.symbol.toUpperCase();
@@ -210,32 +216,38 @@ function calculateHoldings(upToDate = null) {
       }
       
       const holding = holdings.get(symbol);
+      holding.totalCost += quantity * price;
+      holding.quantity += quantity;
+      holding.avgPrice = holding.quantity > 0 ? holding.totalCost / holding.quantity : 0;
       
-      if (trade.action === 'buy') {
-        // Add to holdings
-        holding.totalCost += quantity * price;
-        holding.quantity += quantity;
-        holding.avgPrice = holding.quantity > 0 ? holding.totalCost / holding.quantity : 0;
-      } else if (trade.action === 'sell') {
-        // Remove from holdings (FIFO style - use average cost)
-        if (holding.quantity > 0) {
-          const sellQuantity = Math.min(quantity, holding.quantity);
-          const costBasis = sellQuantity * holding.avgPrice;
-          holding.totalCost -= costBasis;
-          holding.quantity -= sellQuantity;
-          if (holding.quantity <= 0) {
-            holding.quantity = 0;
-            holding.totalCost = 0;
-            holding.avgPrice = 0;
-          } else {
-            holding.avgPrice = holding.totalCost / holding.quantity;
-          }
-        }
-      }
-      
-      // Update market info
       if (trade.market) {
         holding.market = trade.market;
+      }
+    }
+    
+    // Then process all sells
+    for (const trade of sells) {
+      if (!trade.symbol || !trade.quantity || !trade.price) continue;
+      
+      const symbol = trade.symbol.toUpperCase();
+      const quantity = Number(trade.quantity) || 0;
+      
+      if (!holdings.has(symbol)) continue;
+      
+      const holding = holdings.get(symbol);
+      
+      if (holding.quantity > 0) {
+        const sellQuantity = Math.min(quantity, holding.quantity);
+        const costBasis = sellQuantity * holding.avgPrice;
+        holding.totalCost -= costBasis;
+        holding.quantity -= sellQuantity;
+        if (holding.quantity <= 0) {
+          holding.quantity = 0;
+          holding.totalCost = 0;
+          holding.avgPrice = 0;
+        } else {
+          holding.avgPrice = holding.totalCost / holding.quantity;
+        }
       }
     }
   }
@@ -269,6 +281,7 @@ function calculateTradeProfit(trade, holdingsBeforeTrade) {
 }
 
 // Calculate daily profit for a day
+// Logic: Process all buys first, then sells (for same-day trading / day trading)
 function calculateDayProfit(day) {
   if (day.status !== 'open' || !day.trades) return 0;
   
@@ -277,48 +290,63 @@ function calculateDayProfit(day) {
     new Date(new Date(day.date).getTime() - 86400000).toISOString().split('T')[0]
   );
   
-  let dayProfit = 0;
-  const tempHoldings = new Map(holdingsBeforeDay);
+  const tempHoldings = new Map();
   
   // Deep copy holdings
-  for (const [symbol, holding] of tempHoldings) {
+  for (const [symbol, holding] of holdingsBeforeDay) {
     tempHoldings.set(symbol, { ...holding });
   }
   
-  for (const trade of day.trades) {
-    if (trade.action === 'sell') {
-      dayProfit += calculateTradeProfit(trade, tempHoldings);
+  // Separate buys and sells
+  const buys = day.trades.filter(t => t.action === 'buy');
+  const sells = day.trades.filter(t => t.action === 'sell');
+  
+  // Process all buys first (add to holdings)
+  for (const trade of buys) {
+    if (!trade.symbol || !trade.quantity || !trade.price) continue;
+    
+    const symbol = trade.symbol.toUpperCase();
+    const quantity = Number(trade.quantity) || 0;
+    const price = Number(trade.price) || 0;
+    
+    if (!tempHoldings.has(symbol)) {
+      tempHoldings.set(symbol, { quantity: 0, totalCost: 0, avgPrice: 0, market: trade.market || 'tse' });
     }
     
-    // Update temp holdings for subsequent trades on same day
-    if (trade.symbol && trade.quantity && trade.price) {
-      const symbol = trade.symbol.toUpperCase();
-      const quantity = Number(trade.quantity) || 0;
-      const price = Number(trade.price) || 0;
-      
-      if (!tempHoldings.has(symbol)) {
-        tempHoldings.set(symbol, { quantity: 0, totalCost: 0, avgPrice: 0, market: trade.market || 'tse' });
-      }
-      
-      const holding = tempHoldings.get(symbol);
-      
-      if (trade.action === 'buy') {
-        holding.totalCost += quantity * price;
-        holding.quantity += quantity;
-        holding.avgPrice = holding.quantity > 0 ? holding.totalCost / holding.quantity : 0;
-      } else if (trade.action === 'sell') {
-        const sellQuantity = Math.min(quantity, holding.quantity);
-        const costBasis = sellQuantity * holding.avgPrice;
-        holding.totalCost -= costBasis;
-        holding.quantity -= sellQuantity;
-        if (holding.quantity <= 0) {
-          holding.quantity = 0;
-          holding.totalCost = 0;
-          holding.avgPrice = 0;
-        } else {
-          holding.avgPrice = holding.totalCost / holding.quantity;
-        }
-      }
+    const holding = tempHoldings.get(symbol);
+    holding.totalCost += quantity * price;
+    holding.quantity += quantity;
+    holding.avgPrice = holding.quantity > 0 ? holding.totalCost / holding.quantity : 0;
+  }
+  
+  // Then process all sells and calculate profit
+  let dayProfit = 0;
+  
+  for (const trade of sells) {
+    if (!trade.symbol || !trade.quantity || !trade.price) continue;
+    
+    const symbol = trade.symbol.toUpperCase();
+    const quantity = Number(trade.quantity) || 0;
+    const price = Number(trade.price) || 0;
+    
+    const holding = tempHoldings.get(symbol);
+    if (!holding || holding.quantity <= 0) continue;
+    
+    const sellQuantity = Math.min(quantity, holding.quantity);
+    const costBasis = sellQuantity * holding.avgPrice;
+    const revenue = sellQuantity * price;
+    
+    dayProfit += revenue - costBasis;
+    
+    // Update holdings after sell
+    holding.totalCost -= costBasis;
+    holding.quantity -= sellQuantity;
+    if (holding.quantity <= 0) {
+      holding.quantity = 0;
+      holding.totalCost = 0;
+      holding.avgPrice = 0;
+    } else {
+      holding.avgPrice = holding.totalCost / holding.quantity;
     }
   }
   
@@ -823,12 +851,12 @@ function renderTradeEntries() {
 
 function updateDailyTotal() {
   // Calculate estimated profit for today's sells
+  // Process buys first, then sells (for day trading support)
   const currentDate = $('#fDate').value;
   const holdingsBeforeDay = calculateHoldings(
     new Date(new Date(currentDate).getTime() - 86400000).toISOString().split('T')[0]
   );
   
-  let estimatedProfit = 0;
   const tempHoldings = new Map();
   
   // Deep copy holdings
@@ -836,37 +864,46 @@ function updateDailyTotal() {
     tempHoldings.set(symbol, { ...holding });
   }
   
-  for (const trade of tradeEntries) {
+  // Separate buys and sells
+  const buys = tradeEntries.filter(t => t.action === 'buy');
+  const sells = tradeEntries.filter(t => t.action === 'sell');
+  
+  // Process all buys first
+  for (const trade of buys) {
     if (!trade.symbol || !trade.quantity || !trade.price) continue;
     
     const symbol = trade.symbol.toUpperCase();
     const quantity = Number(trade.quantity) || 0;
     const price = Number(trade.price) || 0;
     
-    if (trade.action === 'sell') {
-      const holding = tempHoldings.get(symbol);
-      if (holding && holding.quantity > 0) {
-        const sellQuantity = Math.min(quantity, holding.quantity);
-        const costBasis = sellQuantity * holding.avgPrice;
-        const revenue = sellQuantity * price;
-        estimatedProfit += revenue - costBasis;
-      }
-    }
-    
-    // Update temp holdings
     if (!tempHoldings.has(symbol)) {
       tempHoldings.set(symbol, { quantity: 0, totalCost: 0, avgPrice: 0 });
     }
     
     const holding = tempHoldings.get(symbol);
+    holding.totalCost += quantity * price;
+    holding.quantity += quantity;
+    holding.avgPrice = holding.quantity > 0 ? holding.totalCost / holding.quantity : 0;
+  }
+  
+  // Then calculate profit from sells
+  let estimatedProfit = 0;
+  
+  for (const trade of sells) {
+    if (!trade.symbol || !trade.quantity || !trade.price) continue;
     
-    if (trade.action === 'buy') {
-      holding.totalCost += quantity * price;
-      holding.quantity += quantity;
-      holding.avgPrice = holding.quantity > 0 ? holding.totalCost / holding.quantity : 0;
-    } else if (trade.action === 'sell') {
+    const symbol = trade.symbol.toUpperCase();
+    const quantity = Number(trade.quantity) || 0;
+    const price = Number(trade.price) || 0;
+    
+    const holding = tempHoldings.get(symbol);
+    if (holding && holding.quantity > 0) {
       const sellQuantity = Math.min(quantity, holding.quantity);
       const costBasis = sellQuantity * holding.avgPrice;
+      const revenue = sellQuantity * price;
+      estimatedProfit += revenue - costBasis;
+      
+      // Update holdings after sell
       holding.totalCost -= costBasis;
       holding.quantity -= sellQuantity;
       if (holding.quantity <= 0) {
@@ -988,10 +1025,11 @@ function updateStockRanking() {
   const container = $('#stockRanking');
   
   // Aggregate realized profit by stock symbol
+  // Process buys first, then sells for each day
   const stockMap = new Map();
   
   DAYS.forEach(day => {
-    if (day.status !== 'open') return;
+    if (day.status !== 'open' || !day.trades) return;
     
     // Get holdings before this day
     const holdingsBeforeDay = calculateHoldings(
@@ -1003,31 +1041,20 @@ function updateStockRanking() {
       tempHoldings.set(symbol, { ...holding });
     }
     
-    day.trades?.forEach(trade => {
-      if (!trade.symbol) return;
+    // Separate buys and sells
+    const buys = day.trades.filter(t => t.action === 'buy');
+    const sells = day.trades.filter(t => t.action === 'sell');
+    
+    // Count and process buys first
+    for (const trade of buys) {
+      if (!trade.symbol) continue;
       const symbol = trade.symbol.toUpperCase();
       
       if (!stockMap.has(symbol)) {
         stockMap.set(symbol, { symbol, profit: 0, buyCount: 0, sellCount: 0 });
       }
-      const stock = stockMap.get(symbol);
+      stockMap.get(symbol).buyCount++;
       
-      if (trade.action === 'buy') {
-        stock.buyCount++;
-      } else if (trade.action === 'sell') {
-        stock.sellCount++;
-        // Calculate profit for this sell
-        const holding = tempHoldings.get(symbol);
-        if (holding && holding.quantity > 0) {
-          const sellQuantity = Math.min(Number(trade.quantity) || 0, holding.quantity);
-          const sellPrice = Number(trade.price) || 0;
-          const costBasis = sellQuantity * holding.avgPrice;
-          const revenue = sellQuantity * sellPrice;
-          stock.profit += revenue - costBasis;
-        }
-      }
-      
-      // Update temp holdings
       if (trade.quantity && trade.price) {
         const quantity = Number(trade.quantity) || 0;
         const price = Number(trade.price) || 0;
@@ -1037,26 +1064,45 @@ function updateStockRanking() {
         }
         
         const holding = tempHoldings.get(symbol);
+        holding.totalCost += quantity * price;
+        holding.quantity += quantity;
+        holding.avgPrice = holding.quantity > 0 ? holding.totalCost / holding.quantity : 0;
+      }
+    }
+    
+    // Then process sells and calculate profit
+    for (const trade of sells) {
+      if (!trade.symbol) continue;
+      const symbol = trade.symbol.toUpperCase();
+      
+      if (!stockMap.has(symbol)) {
+        stockMap.set(symbol, { symbol, profit: 0, buyCount: 0, sellCount: 0 });
+      }
+      const stock = stockMap.get(symbol);
+      stock.sellCount++;
+      
+      // Calculate profit for this sell
+      const holding = tempHoldings.get(symbol);
+      if (holding && holding.quantity > 0 && trade.quantity && trade.price) {
+        const quantity = Number(trade.quantity) || 0;
+        const price = Number(trade.price) || 0;
+        const sellQuantity = Math.min(quantity, holding.quantity);
+        const costBasis = sellQuantity * holding.avgPrice;
+        const revenue = sellQuantity * price;
+        stock.profit += revenue - costBasis;
         
-        if (trade.action === 'buy') {
-          holding.totalCost += quantity * price;
-          holding.quantity += quantity;
-          holding.avgPrice = holding.quantity > 0 ? holding.totalCost / holding.quantity : 0;
-        } else if (trade.action === 'sell') {
-          const sellQuantity = Math.min(quantity, holding.quantity);
-          const costBasis = sellQuantity * holding.avgPrice;
-          holding.totalCost -= costBasis;
-          holding.quantity -= sellQuantity;
-          if (holding.quantity <= 0) {
-            holding.quantity = 0;
-            holding.totalCost = 0;
-            holding.avgPrice = 0;
-          } else {
-            holding.avgPrice = holding.totalCost / holding.quantity;
-          }
+        // Update holdings after sell
+        holding.totalCost -= costBasis;
+        holding.quantity -= sellQuantity;
+        if (holding.quantity <= 0) {
+          holding.quantity = 0;
+          holding.totalCost = 0;
+          holding.avgPrice = 0;
+        } else {
+          holding.avgPrice = holding.totalCost / holding.quantity;
         }
       }
-    });
+    }
   });
   
   const stocks = Array.from(stockMap.values())
