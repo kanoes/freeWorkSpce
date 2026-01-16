@@ -186,6 +186,12 @@ let dividendDenominator = 3;
 // Edit mode flag
 let isEditMode = false;
 
+// AI Assistant state
+let openaiApiKey = localStorage.getItem('openai_api_key') || '';
+let chatHistory = [];
+let currentChatMode = null; // 'trade' or 'general'
+let isAILoading = false;
+
 // ===== Holdings Management =====
 // Calculate holdings based on all trades up to a specific date
 // For each day, process buys first then sells (for day trading support)
@@ -1728,6 +1734,47 @@ function bindEvents() {
   $('#btnDividend').addEventListener('click', openDividendPage);
   $('#btnBackFromDividend').addEventListener('click', closeDividendPage);
   
+  // AI Assistant button
+  $('#btnAIAssistant').addEventListener('click', openAIPage);
+  $('#btnBackFromAI').addEventListener('click', closeAIPage);
+  
+  // AI Chat events
+  $('#btnSendTradeData').addEventListener('click', startTradeDataChat);
+  $('#btnAskOther').addEventListener('click', startGeneralChat);
+  
+  $('#chatInput').addEventListener('input', (e) => {
+    updateSendButtonState();
+    // Auto-resize textarea
+    e.target.style.height = 'auto';
+    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+  });
+  
+  $('#chatInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  });
+  
+  $('#btnSendMessage').addEventListener('click', handleSendMessage);
+  
+  // API Key input
+  $('#openaiApiKey').addEventListener('input', (e) => {
+    openaiApiKey = e.target.value.trim();
+    localStorage.setItem('openai_api_key', openaiApiKey);
+  });
+  
+  $('#btnToggleApiKey').addEventListener('click', () => {
+    const input = $('#openaiApiKey');
+    if (input.type === 'password') {
+      input.type = 'text';
+      $('#btnToggleApiKey').textContent = '🙈';
+    } else {
+      input.type = 'password';
+      $('#btnToggleApiKey').textContent = '👁';
+    }
+  });
+  
   // Dividend ratio inputs
   $('#dividendNumerator').addEventListener('input', (e) => {
     const value = parseInt(e.target.value);
@@ -1967,12 +2014,297 @@ function bindEvents() {
   }
 }
 
+// ===== AI Assistant =====
+function openAIPage() {
+  $('#mainPage').hidden = true;
+  $('#aiPage').hidden = false;
+  
+  // Check if API key is set
+  if (!openaiApiKey) {
+    showChatMessage('system', '⚠️ 请先在设置中输入 OpenAI API Key');
+    $('#quickActions').hidden = true;
+    $('#chatInput').disabled = true;
+    $('#btnSendMessage').disabled = true;
+    return;
+  }
+  
+  // Reset chat
+  chatHistory = [];
+  currentChatMode = null;
+  $('#chatContainer').innerHTML = '';
+  $('#quickActions').hidden = false;
+  $('#chatInput').disabled = false;
+  
+  // Show welcome message
+  showChatMessage('assistant', `你好！我是甜饼工坊的 AI 助手 🍪\n\n我可以帮你分析交易数据，或者回答其他问题。请选择下方的选项开始对话：`);
+}
+
+function closeAIPage() {
+  $('#aiPage').hidden = true;
+  $('#mainPage').hidden = false;
+}
+
+function showChatMessage(role, content) {
+  const container = $('#chatContainer');
+  const messageEl = document.createElement('div');
+  messageEl.className = `chat-message ${role}`;
+  
+  // Convert newlines to <br> and handle basic markdown
+  const formattedContent = content
+    .replace(/\n/g, '<br>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+  
+  messageEl.innerHTML = formattedContent;
+  container.appendChild(messageEl);
+  container.scrollTop = container.scrollHeight;
+}
+
+function showTypingIndicator() {
+  const container = $('#chatContainer');
+  const typingEl = document.createElement('div');
+  typingEl.className = 'chat-message assistant';
+  typingEl.id = 'typingIndicator';
+  typingEl.innerHTML = `
+    <div class="typing-indicator">
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+  `;
+  container.appendChild(typingEl);
+  container.scrollTop = container.scrollHeight;
+}
+
+function hideTypingIndicator() {
+  const typingEl = $('#typingIndicator');
+  if (typingEl) typingEl.remove();
+}
+
+function generateTradeDataPrompt() {
+  // Get current holdings
+  const holdings = calculateHoldings();
+  const holdingsData = Array.from(holdings.entries()).map(([symbol, data]) => ({
+    symbol,
+    name: getCompanyName(symbol),
+    quantity: data.quantity,
+    avgPrice: data.avgPrice,
+    market: data.market,
+    totalValue: data.quantity * data.avgPrice
+  }));
+  
+  // Get all trade history
+  const tradeHistory = DAYS
+    .filter(d => d.status === 'open' && d.trades?.length > 0)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .map(day => ({
+      date: day.date,
+      trades: day.trades.map(t => ({
+        symbol: t.symbol,
+        name: getCompanyName(t.symbol),
+        action: t.action,
+        market: t.market,
+        quantity: t.quantity,
+        price: t.price,
+        amount: t.quantity * t.price
+      })),
+      dayProfit: calculateDayProfit(day)
+    }));
+  
+  // Calculate summary stats
+  let totalProfit = 0;
+  let winDays = 0;
+  let lossDays = 0;
+  
+  tradeHistory.forEach(day => {
+    totalProfit += day.dayProfit;
+    if (day.dayProfit > 0) winDays++;
+    else if (day.dayProfit < 0) lossDays++;
+  });
+  
+  const systemPrompt = `你是一个专业的股票交易分析助手，名叫"甜饼助手"。用户正在使用一个名为"甜饼工坊"的交易记录应用。
+
+以下是用户的交易数据：
+
+## 当前持仓
+${holdingsData.length > 0 ? JSON.stringify(holdingsData, null, 2) : '暂无持仓'}
+
+## 交易历史摘要
+- 总交易天数: ${tradeHistory.length} 天
+- 盈利天数: ${winDays} 天
+- 亏损天数: ${lossDays} 天
+- 累计已实现收益: ¥${totalProfit.toLocaleString()}
+- 胜率: ${tradeHistory.length > 0 ? Math.round((winDays / tradeHistory.length) * 100) : 0}%
+
+## 详细交易记录（最近30天）
+${JSON.stringify(tradeHistory.slice(-30), null, 2)}
+
+请基于以上数据回答用户的问题。你可以：
+1. 分析交易表现和盈亏情况
+2. 识别交易模式和习惯
+3. 提供改进建议
+4. 解答关于具体股票的问题
+
+回答时请使用中文，保持友好和专业的语气。如果用户问的问题与交易数据无关，也可以正常回答。`;
+
+  return systemPrompt;
+}
+
+async function sendToOpenAI(userMessage) {
+  if (!openaiApiKey) {
+    showChatMessage('error', '请先在设置中输入 OpenAI API Key');
+    return;
+  }
+  
+  if (isAILoading) return;
+  
+  isAILoading = true;
+  $('#btnSendMessage').disabled = true;
+  $('#chatInput').disabled = true;
+  $$('.quick-action-btn').forEach(btn => btn.disabled = true);
+  
+  showTypingIndicator();
+  
+  // Build messages array
+  const messages = [];
+  
+  // Add system prompt based on mode
+  if (currentChatMode === 'trade') {
+    messages.push({
+      role: 'system',
+      content: generateTradeDataPrompt()
+    });
+  } else {
+    messages.push({
+      role: 'system',
+      content: '你是一个友好的AI助手，名叫"甜饼助手"。请用中文回答用户的问题，保持友好和专业的语气。'
+    });
+  }
+  
+  // Add chat history
+  chatHistory.forEach(msg => {
+    messages.push({
+      role: msg.role,
+      content: msg.content
+    });
+  });
+  
+  // Add current message
+  messages.push({
+    role: 'user',
+    content: userMessage
+  });
+  
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiApiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: messages,
+        temperature: 0.7,
+        max_tokens: 2000
+      })
+    });
+    
+    hideTypingIndicator();
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        throw new Error('API Key 无效，请检查设置');
+      } else if (response.status === 429) {
+        throw new Error('请求过于频繁，请稍后再试');
+      } else {
+        throw new Error(errorData.error?.message || `请求失败 (${response.status})`);
+      }
+    }
+    
+    const data = await response.json();
+    const assistantMessage = data.choices[0]?.message?.content || '抱歉，我无法生成回复。';
+    
+    // Save to history
+    chatHistory.push({ role: 'user', content: userMessage });
+    chatHistory.push({ role: 'assistant', content: assistantMessage });
+    
+    // Show response
+    showChatMessage('assistant', assistantMessage);
+    
+  } catch (error) {
+    hideTypingIndicator();
+    showChatMessage('error', `❌ ${error.message}`);
+  } finally {
+    isAILoading = false;
+    $('#btnSendMessage').disabled = false;
+    $('#chatInput').disabled = false;
+    $$('.quick-action-btn').forEach(btn => btn.disabled = false);
+    updateSendButtonState();
+  }
+}
+
+function updateSendButtonState() {
+  const input = $('#chatInput');
+  const btn = $('#btnSendMessage');
+  btn.disabled = !input.value.trim() || isAILoading || !openaiApiKey;
+}
+
+function handleSendMessage() {
+  const input = $('#chatInput');
+  const message = input.value.trim();
+  
+  if (!message || isAILoading) return;
+  
+  // Show user message
+  showChatMessage('user', message);
+  input.value = '';
+  input.style.height = 'auto';
+  updateSendButtonState();
+  
+  // Send to AI
+  sendToOpenAI(message);
+}
+
+function startTradeDataChat() {
+  if (!openaiApiKey) {
+    showChatMessage('error', '请先在设置中输入 OpenAI API Key');
+    return;
+  }
+  
+  currentChatMode = 'trade';
+  $('#quickActions').hidden = true;
+  
+  showChatMessage('system', '📊 已加载交易数据，你可以开始提问了');
+  showChatMessage('assistant', '我已经获取了你的交易数据！你可以问我：\n\n• 我的整体交易表现如何？\n• 哪只股票给我带来了最多收益？\n• 分析一下我的交易习惯\n• 我目前的持仓情况怎么样？\n• 有什么改进建议吗？\n\n或者任何其他关于你交易的问题！');
+}
+
+function startGeneralChat() {
+  if (!openaiApiKey) {
+    showChatMessage('error', '请先在设置中输入 OpenAI API Key');
+    return;
+  }
+  
+  currentChatMode = 'general';
+  $('#quickActions').hidden = true;
+  
+  showChatMessage('assistant', '好的，你想聊些什么呢？我可以回答各种问题 😊');
+}
+
 // ===== Initialize =====
 async function init() {
   await loadCompanyData();
   initChart();
   bindEvents();
   await refresh();
+  
+  // Load saved API key
+  const savedKey = localStorage.getItem('openai_api_key');
+  if (savedKey) {
+    openaiApiKey = savedKey;
+    $('#openaiApiKey').value = savedKey;
+  }
 }
 
 // Start the app

@@ -1,5 +1,5 @@
 /* 甜饼工坊 Service Worker */
-const CACHE_NAME = 'cookie-workshop-v3.2';
+const CACHE_NAME = 'cookie-workshop-v3.3';
 const ASSETS = [
   './',
   './index.html',

@@ -79,8 +79,8 @@
       </section>
 
       <!-- Action Buttons -->
-      <div class="action-buttons">
-        <button class="add-day-btn" id="btnAddDay">
+      <div class="action-buttons four-cols">
+        <button class="add-day-btn compact" id="btnAddDay">
           <span class="add-icon">+</span>
           <span>添加记录</span>
         </button>
@@ -91,6 +91,10 @@
         <button class="feature-btn" id="btnAnalysis">
           <span class="feature-icon">📊</span>
           <span>数据分析</span>
+        </button>
+        <button class="feature-btn ai-btn" id="btnAIAssistant">
+          <span class="feature-icon">🤖</span>
+          <span>AI助手</span>
         </button>
       </div>
 
@@ -471,6 +475,22 @@
           <span class="chevron">›</span>
         </button>
 
+        <div class="settings-section-title">AI 助手设置</div>
+
+        <div class="settings-item api-key-item">
+          <div class="settings-item-content">
+            <span class="settings-icon">🔑</span>
+            <div>
+              <div class="settings-title">OpenAI API Key</div>
+              <div class="settings-desc">用于 AI 助手功能</div>
+            </div>
+          </div>
+        </div>
+        <div class="api-key-input-wrapper">
+          <input type="password" id="openaiApiKey" class="api-key-input" placeholder="sk-..." />
+          <button type="button" class="toggle-visibility-btn" id="btnToggleApiKey">👁</button>
+        </div>
+
         <div class="settings-section-title">危险操作</div>
 
         <button class="settings-item danger" id="btnClearAll">
@@ -512,6 +532,49 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- AI Assistant Page -->
+  <div class="app ai-page" id="aiPage" hidden>
+    <header class="header">
+      <div class="header-content">
+        <button class="back-btn" id="btnBackFromAI">
+          <span>←</span>
+          <span>返回</span>
+        </button>
+        <div class="title-group center">
+          <h1>🤖 AI 助手</h1>
+        </div>
+        <div class="header-spacer"></div>
+      </div>
+    </header>
+
+    <main class="ai-main">
+      <div class="chat-container" id="chatContainer">
+        <!-- Chat messages will be inserted here -->
+      </div>
+      
+      <div class="chat-input-area">
+        <div class="quick-actions" id="quickActions">
+          <button class="quick-action-btn" id="btnSendTradeData">
+            <span class="quick-icon">📊</span>
+            <span>发送交易数据</span>
+          </button>
+          <button class="quick-action-btn" id="btnAskOther">
+            <span class="quick-icon">💬</span>
+            <span>问问交易以外的问题</span>
+          </button>
+        </div>
+        <div class="chat-input-wrapper">
+          <textarea id="chatInput" class="chat-input" placeholder="输入消息..." rows="1"></textarea>
+          <button class="send-btn" id="btnSendMessage" disabled>
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </main>
   </div>
 
   <script src="app.js"></script>
