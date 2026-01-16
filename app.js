@@ -177,7 +177,8 @@ let currentPage = 1;
 const RECORDS_PER_PAGE = 7;
 
 // Dividend settings
-let dividendRatio = 3; // Default 1/3
+let dividendNumerator = 1; // Default numerator
+let dividendDenominator = 3; // Default denominator
 
 // ===== Chart =====
 function initChart() {
@@ -935,7 +936,7 @@ function closeDividendPage() {
 }
 
 function calculateDividend(profit) {
-  const ratio = 1 / dividendRatio;
+  const ratio = dividendNumerator / dividendDenominator;
   
   if (profit >= 0) {
     // Profit: dividend = profit * ratio * 80% (after tax), round up to integer
@@ -947,16 +948,9 @@ function calculateDividend(profit) {
 }
 
 function updateDividendPage() {
-  updateRatioPreview();
   updateTodayDividend();
   updateDividendHistory();
   updateDividendSummary();
-}
-
-function updateRatioPreview() {
-  const ratio = 1 / dividendRatio;
-  const percentage = (ratio * 100).toFixed(2);
-  $('#ratioPreview').textContent = `${percentage}%`;
 }
 
 function updateTodayDividend() {
@@ -1199,11 +1193,19 @@ function bindEvents() {
   $('#btnDividend').addEventListener('click', openDividendPage);
   $('#btnBackFromDividend').addEventListener('click', closeDividendPage);
   
-  // Dividend ratio input
-  $('#dividendRatio').addEventListener('input', (e) => {
+  // Dividend ratio inputs
+  $('#dividendNumerator').addEventListener('input', (e) => {
     const value = parseInt(e.target.value);
     if (value >= 1) {
-      dividendRatio = value;
+      dividendNumerator = value;
+      updateDividendPage();
+    }
+  });
+  
+  $('#dividendDenominator').addEventListener('input', (e) => {
+    const value = parseInt(e.target.value);
+    if (value >= 1) {
+      dividendDenominator = value;
       updateDividendPage();
     }
   });

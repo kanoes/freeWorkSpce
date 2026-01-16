@@ -238,11 +238,6 @@ body::before {
   -webkit-backdrop-filter: blur(20px);
 }
 
-.summary-card.highlight {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.1));
-  border-color: rgba(245, 158, 11, 0.3);
-}
-
 .summary-icon {
   font-size: 24px;
 }
@@ -262,13 +257,6 @@ body::before {
   display: block;
   font-size: 16px;
   font-weight: 700;
-}
-
-.summary-card.highlight .summary-value {
-  background: linear-gradient(135deg, var(--accent-primary), var(--accent-cookie));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 /* ===== Cards ===== */
@@ -552,18 +540,27 @@ body::before {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
+  position: relative;
+  overflow: hidden;
 }
 
-.pagination-btn:hover:not(:disabled),
-.pagination-btn:active:not(:disabled) {
+.pagination-btn:hover:not(:disabled) {
   background: var(--bg-card-hover);
   border-color: var(--accent-primary);
   color: var(--accent-primary);
+}
+
+.pagination-btn:active:not(:disabled) {
+  transform: scale(0.95);
+  background: var(--accent-primary-glow);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-primary-glow);
 }
 
 .pagination-btn:disabled {
@@ -833,18 +830,19 @@ body::before {
 .ratio-input-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 12px;
 }
 
 .ratio-text {
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 700;
   color: var(--accent-primary);
 }
 
 .ratio-input {
-  width: 80px;
-  padding: 12px 16px;
+  width: 70px;
+  padding: 12px 8px;
   font-size: 24px;
   font-weight: 700;
   text-align: center;
@@ -855,44 +853,6 @@ body::before {
   outline: none;
 }
 
-.ratio-preview {
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.ratio-preview span {
-  color: var(--accent-primary);
-  font-weight: 600;
-}
-
-.dividend-rules {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.rule-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-  background: var(--bg-elevated);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.rule-item.profit {
-  border-left: 3px solid var(--accent-success);
-}
-
-.rule-item.loss {
-  border-left: 3px solid var(--accent-danger);
-}
-
-.rule-icon {
-  font-size: 18px;
-}
 
 /* Today Dividend */
 .today-dividend {

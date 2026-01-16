@@ -40,7 +40,7 @@
     <main class="main">
       <!-- Summary Cards -->
       <section class="summary-section">
-        <div class="summary-card highlight">
+        <div class="summary-card">
           <div class="summary-icon">💰</div>
           <div class="summary-info">
             <span class="summary-label">总收益</span>
@@ -233,21 +233,9 @@
         <div class="dividend-ratio-setting">
           <div class="ratio-label">分红比例</div>
           <div class="ratio-input-group">
-            <span class="ratio-text">1 /</span>
-            <input type="number" id="dividendRatio" class="ratio-input" value="3" min="1" step="1" />
-          </div>
-          <div class="ratio-preview">
-            当前比例：<span id="ratioPreview">33.33%</span>
-          </div>
-        </div>
-        <div class="dividend-rules">
-          <div class="rule-item profit">
-            <span class="rule-icon">📈</span>
-            <span>盈利分红 = 收益 × 分红率 × 80%（扣税）</span>
-          </div>
-          <div class="rule-item loss">
-            <span class="rule-icon">📉</span>
-            <span>亏损分担 = 亏损 × 分红率 × 100%</span>
+            <input type="number" id="dividendNumerator" class="ratio-input" value="1" min="1" step="1" />
+            <span class="ratio-text">/</span>
+            <input type="number" id="dividendDenominator" class="ratio-input" value="3" min="1" step="1" />
           </div>
         </div>
       </section>
