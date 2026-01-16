@@ -170,6 +170,19 @@
         </div>
       </section>
 
+      <!-- Current Holdings -->
+      <section class="card">
+        <div class="card-header">
+          <h2>📦 当前持仓</h2>
+        </div>
+        <div class="holdings-list" id="holdingsList">
+          <div class="empty-state">
+            <div class="empty-icon">📦</div>
+            <div class="empty-title">暂无持仓</div>
+          </div>
+        </div>
+      </section>
+
       <!-- Stock Ranking -->
       <section class="card">
         <div class="card-header">
@@ -180,6 +193,27 @@
             <div class="empty-icon">📈</div>
             <div class="empty-title">暂无数据</div>
             <div class="empty-desc">开始记录交易后这里会显示排行</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Trading Frequency -->
+      <section class="card">
+        <div class="card-header">
+          <h2>📈 交易频率</h2>
+        </div>
+        <div class="trading-stats" id="tradingStats">
+          <div class="stat-row">
+            <span class="stat-label">总买入次数</span>
+            <span class="stat-value" id="totalBuyCount">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">总卖出次数</span>
+            <span class="stat-value" id="totalSellCount">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">平均每日交易</span>
+            <span class="stat-value" id="avgDailyTrades">0</span>
           </div>
         </div>
       </section>
@@ -225,13 +259,12 @@
     </header>
 
     <main class="main">
-      <!-- Dividend Settings -->
-      <section class="card dividend-settings-card">
+      <!-- Dividend Ratio -->
+      <section class="card">
         <div class="card-header">
-          <h2>⚙️ 分红设置</h2>
+          <h2>📊 分红比例</h2>
         </div>
         <div class="dividend-ratio-setting">
-          <div class="ratio-label">分红比例</div>
           <div class="ratio-input-group">
             <input type="number" id="dividendNumerator" class="ratio-input" value="1" min="1" step="1" />
             <span class="ratio-text">/</span>
@@ -336,14 +369,14 @@
               <!-- Trade entries will be added here -->
             </div>
             <button type="button" class="add-trade-btn" id="btnAddTrade">
-              <span>+ 添加股票</span>
+              <span>+ 添加交易</span>
             </button>
           </div>
 
           <!-- Daily Summary -->
           <div class="daily-summary">
             <div class="summary-row">
-              <span>今日总损益</span>
+              <span>今日已实现损益</span>
               <span class="daily-total" id="dailyTotal">¥0</span>
             </div>
           </div>
@@ -439,7 +472,7 @@
       </div>
 
       <div class="settings-footer">
-        <p>甜饼工坊 v2.1</p>
+        <p>甜饼工坊 v3.0</p>
         <p>数据仅保存在本地设备</p>
       </div>
     </div>

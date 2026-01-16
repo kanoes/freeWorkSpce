@@ -653,6 +653,89 @@ body::before {
   font-weight: 700;
 }
 
+/* Holdings List */
+.holdings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.holding-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.holding-info {
+  flex: 1;
+}
+
+.holding-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.holding-details {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.holding-data {
+  text-align: right;
+}
+
+.holding-quantity {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent-primary);
+}
+
+.holding-avg {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.holding-value {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* Trading Stats */
+.trading-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+}
+
+.stat-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent-primary);
+}
+
 /* Stock Ranking */
 .stock-ranking {
   display: flex;
@@ -1152,13 +1235,24 @@ body::before {
 
 .trade-entry {
   display: flex;
-  gap: 10px;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
 }
 
-.trade-entry .form-input {
+.trade-entry .form-input,
+.trade-entry .form-select {
   padding: 12px 14px;
   font-size: 14px;
+}
+
+.trade-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
 }
 
 .trade-input-group {
@@ -1167,6 +1261,10 @@ body::before {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.symbol-group {
+  flex: 1;
 }
 
 .trade-entry .symbol-input {
@@ -1188,21 +1286,66 @@ body::before {
   max-height: 20px;
 }
 
-.trade-entry .profit-input {
-  width: 120px;
-  align-self: flex-start;
+.trade-select-group {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+}
+
+.form-select {
+  flex: 1;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23999' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.form-select:focus {
+  border-color: var(--accent-primary);
+  outline: none;
+}
+
+.action-select {
+  min-width: 80px;
+}
+
+.market-select {
+  min-width: 80px;
+}
+
+.quantity-input,
+.price-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.trade-amount {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: right;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-color);
 }
 
 .trade-entry .remove-trade-btn {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
   background: var(--accent-danger-glow);
   border: 1px solid rgba(248, 113, 113, 0.3);
   border-radius: var(--radius-sm);
   color: var(--accent-danger);
-  font-size: 18px;
+  font-size: 16px;
   cursor: pointer;
   flex-shrink: 0;
 }

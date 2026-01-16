@@ -1,4 +1,5 @@
-// ===== 甜饼工坊 App =====
+// ===== 甜饼工坊 App v3.0 =====
+// 支持买卖交易记录、持仓管理、自动损益计算
 
 // Service Worker Registration
 if ('serviceWorker' in navigator) {
@@ -48,7 +49,6 @@ async function loadCompanyData() {
     const data = await response.json();
     if (data.companies && Array.isArray(data.companies)) {
       data.companies.forEach(company => {
-        // Store with uppercase code for case-insensitive lookup
         companyMap.set(company.code.toUpperCase(), {
           name: company.name,
           market: company.market
@@ -61,14 +61,12 @@ async function loadCompanyData() {
   }
 }
 
-// Get company name by stock code, returns code if not found
 function getCompanyName(code) {
   if (!code) return '';
   const company = companyMap.get(code.toUpperCase());
   return company ? company.name : code;
 }
 
-// Get display text: company name with code in parentheses
 function getStockDisplayName(code) {
   if (!code) return '';
   const company = companyMap.get(code.toUpperCase());
@@ -80,7 +78,7 @@ function getStockDisplayName(code) {
 
 // ===== IndexedDB =====
 const DB_NAME = 'tradediary_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Upgraded for new data structure
 const STORE_NAME = 'days';
 
 function openDB() {
@@ -177,8 +175,155 @@ let currentPage = 1;
 const RECORDS_PER_PAGE = 7;
 
 // Dividend settings
-let dividendNumerator = 1; // Default numerator
-let dividendDenominator = 3; // Default denominator
+let dividendNumerator = 1;
+let dividendDenominator = 3;
+
+// ===== Holdings Management =====
+// Calculate holdings based on all trades up to a specific date
+function calculateHoldings(upToDate = null) {
+  const holdings = new Map(); // symbol -> { quantity, totalCost, avgPrice, market }
+  
+  // Sort days by date
+  const sortedDays = [...DAYS]
+    .filter(d => d.status === 'open')
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+  
+  for (const day of sortedDays) {
+    if (upToDate && day.date > upToDate) break;
+    
+    if (!day.trades) continue;
+    
+    for (const trade of day.trades) {
+      if (!trade.symbol || !trade.quantity || !trade.price) continue;
+      
+      const symbol = trade.symbol.toUpperCase();
+      const quantity = Number(trade.quantity) || 0;
+      const price = Number(trade.price) || 0;
+      
+      if (!holdings.has(symbol)) {
+        holdings.set(symbol, { 
+          quantity: 0, 
+          totalCost: 0, 
+          avgPrice: 0, 
+          market: trade.market || 'tse' 
+        });
+      }
+      
+      const holding = holdings.get(symbol);
+      
+      if (trade.action === 'buy') {
+        // Add to holdings
+        holding.totalCost += quantity * price;
+        holding.quantity += quantity;
+        holding.avgPrice = holding.quantity > 0 ? holding.totalCost / holding.quantity : 0;
+      } else if (trade.action === 'sell') {
+        // Remove from holdings (FIFO style - use average cost)
+        if (holding.quantity > 0) {
+          const sellQuantity = Math.min(quantity, holding.quantity);
+          const costBasis = sellQuantity * holding.avgPrice;
+          holding.totalCost -= costBasis;
+          holding.quantity -= sellQuantity;
+          if (holding.quantity <= 0) {
+            holding.quantity = 0;
+            holding.totalCost = 0;
+            holding.avgPrice = 0;
+          } else {
+            holding.avgPrice = holding.totalCost / holding.quantity;
+          }
+        }
+      }
+      
+      // Update market info
+      if (trade.market) {
+        holding.market = trade.market;
+      }
+    }
+  }
+  
+  // Remove zero holdings
+  for (const [symbol, holding] of holdings) {
+    if (holding.quantity <= 0) {
+      holdings.delete(symbol);
+    }
+  }
+  
+  return holdings;
+}
+
+// Calculate profit for a sell trade based on holdings at that point
+function calculateTradeProfit(trade, holdingsBeforeTrade) {
+  if (trade.action !== 'sell') return 0;
+  
+  const symbol = trade.symbol?.toUpperCase();
+  if (!symbol) return 0;
+  
+  const holding = holdingsBeforeTrade.get(symbol);
+  if (!holding || holding.quantity <= 0) return 0;
+  
+  const sellQuantity = Math.min(Number(trade.quantity) || 0, holding.quantity);
+  const sellPrice = Number(trade.price) || 0;
+  const costBasis = sellQuantity * holding.avgPrice;
+  const revenue = sellQuantity * sellPrice;
+  
+  return revenue - costBasis;
+}
+
+// Calculate daily profit for a day
+function calculateDayProfit(day) {
+  if (day.status !== 'open' || !day.trades) return 0;
+  
+  // Get holdings before this day
+  const holdingsBeforeDay = calculateHoldings(
+    new Date(new Date(day.date).getTime() - 86400000).toISOString().split('T')[0]
+  );
+  
+  let dayProfit = 0;
+  const tempHoldings = new Map(holdingsBeforeDay);
+  
+  // Deep copy holdings
+  for (const [symbol, holding] of tempHoldings) {
+    tempHoldings.set(symbol, { ...holding });
+  }
+  
+  for (const trade of day.trades) {
+    if (trade.action === 'sell') {
+      dayProfit += calculateTradeProfit(trade, tempHoldings);
+    }
+    
+    // Update temp holdings for subsequent trades on same day
+    if (trade.symbol && trade.quantity && trade.price) {
+      const symbol = trade.symbol.toUpperCase();
+      const quantity = Number(trade.quantity) || 0;
+      const price = Number(trade.price) || 0;
+      
+      if (!tempHoldings.has(symbol)) {
+        tempHoldings.set(symbol, { quantity: 0, totalCost: 0, avgPrice: 0, market: trade.market || 'tse' });
+      }
+      
+      const holding = tempHoldings.get(symbol);
+      
+      if (trade.action === 'buy') {
+        holding.totalCost += quantity * price;
+        holding.quantity += quantity;
+        holding.avgPrice = holding.quantity > 0 ? holding.totalCost / holding.quantity : 0;
+      } else if (trade.action === 'sell') {
+        const sellQuantity = Math.min(quantity, holding.quantity);
+        const costBasis = sellQuantity * holding.avgPrice;
+        holding.totalCost -= costBasis;
+        holding.quantity -= sellQuantity;
+        if (holding.quantity <= 0) {
+          holding.quantity = 0;
+          holding.totalCost = 0;
+          holding.avgPrice = 0;
+        } else {
+          holding.avgPrice = holding.totalCost / holding.quantity;
+        }
+      }
+    }
+  }
+  
+  return dayProfit;
+}
 
 // ===== Chart =====
 function initChart() {
@@ -261,7 +406,6 @@ function initChart() {
 function updateChart(range = 'week') {
   if (!profitChart) return;
   
-  // Filter open days and sort by date
   const openDays = DAYS
     .filter(d => d.status === 'open')
     .sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -277,13 +421,12 @@ function updateChart(range = 'week') {
     filteredDays = openDays.filter(d => new Date(d.date) >= monthAgo);
   }
   
-  // Calculate cumulative profit
   let cumulative = 0;
   const labels = [];
   const data = [];
   
   filteredDays.forEach(day => {
-    const profit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+    const profit = calculateDayProfit(day);
     cumulative += profit;
     
     const dateInfo = formatDate(day.date);
@@ -294,7 +437,6 @@ function updateChart(range = 'week') {
   profitChart.data.labels = labels;
   profitChart.data.datasets[0].data = data;
   
-  // Update gradient based on profit
   const ctx = $('#profitChart').getContext('2d');
   const gradient = ctx.createLinearGradient(0, 0, 0, 200);
   
@@ -302,7 +444,7 @@ function updateChart(range = 'week') {
     gradient.addColorStop(0, 'rgba(52, 211, 153, 0.3)');
     gradient.addColorStop(1, 'rgba(52, 211, 153, 0)');
     profitChart.data.datasets[0].borderColor = '#34d399';
-    } else {
+  } else {
     gradient.addColorStop(0, 'rgba(248, 113, 113, 0.3)');
     gradient.addColorStop(1, 'rgba(248, 113, 113, 0)');
     profitChart.data.datasets[0].borderColor = '#f87171';
@@ -312,17 +454,15 @@ function updateChart(range = 'week') {
   profitChart.update();
 }
 
-// ===== Summary Stats (Total) =====
+// ===== Summary Stats =====
 function updateSummary() {
-  // Get all open days
   const openDays = DAYS.filter(d => d.status === 'open');
   
-  // Calculate total profit
   let totalProfit = 0;
   let winDays = 0;
   
   openDays.forEach(day => {
-    const dayProfit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+    const dayProfit = calculateDayProfit(day);
     totalProfit += dayProfit;
     if (dayProfit > 0) winDays++;
   });
@@ -330,7 +470,6 @@ function updateSummary() {
   const tradeDays = openDays.length;
   const winRate = tradeDays > 0 ? Math.round((winDays / tradeDays) * 100) : 0;
   
-  // Update UI
   const profitEl = $('#totalProfit');
   profitEl.textContent = formatMoneyShort(totalProfit);
   profitEl.className = 'summary-value';
@@ -339,7 +478,7 @@ function updateSummary() {
   $('#winRate').textContent = `${winRate}%`;
 }
 
-// ===== Records List with Pagination =====
+// ===== Records List =====
 function updateMonthFilter() {
   const select = $('#monthFilter');
   const months = new Set();
@@ -396,10 +535,8 @@ function renderRecords() {
     return;
   }
   
-  // Calculate pagination
   const totalPages = Math.ceil(filteredDays.length / RECORDS_PER_PAGE);
   
-  // Ensure current page is valid
   if (currentPage > totalPages) currentPage = totalPages;
   if (currentPage < 1) currentPage = 1;
   
@@ -432,14 +569,18 @@ function renderRecords() {
     let profitHtml = '';
     
     if (day.status === 'open' && day.trades?.length > 0) {
-      // Use company names instead of stock codes
-      const names = day.trades
-        .map(t => t.symbol ? getStockDisplayName(t.symbol) : null)
-        .filter(Boolean)
-        .join(', ');
-      tradesInfo = names || '无交易';
+      // Show trade summary
+      const buyCount = day.trades.filter(t => t.action === 'buy').length;
+      const sellCount = day.trades.filter(t => t.action === 'sell').length;
+      const symbols = [...new Set(day.trades.map(t => t.symbol).filter(Boolean))];
+      const symbolNames = symbols.map(s => getStockDisplayName(s)).join(', ');
       
-      const totalProfit = day.trades.reduce((sum, t) => sum + (Number(t.profit) || 0), 0);
+      tradesInfo = symbolNames || '无交易';
+      if (buyCount > 0 || sellCount > 0) {
+        tradesInfo += ` (买${buyCount}/卖${sellCount})`;
+      }
+      
+      const totalProfit = calculateDayProfit(day);
       const profitClass = totalProfit > 0 ? 'positive' : (totalProfit < 0 ? 'negative' : 'zero');
       profitHtml = `<div class="record-profit ${profitClass}">${formatMoney(totalProfit)}</div>`;
     } else if (day.status === 'open') {
@@ -467,15 +608,12 @@ function renderRecords() {
     `;
   }).join('');
   
-  // Update pagination
   const prevBtn = $('#btnPrevPage');
   const nextBtn = $('#btnNextPage');
   
   if (totalPages > 1) {
     pagination.hidden = false;
     $('#paginationInfo').textContent = `${currentPage} / ${totalPages}`;
-    
-    // Use disabled property for better cross-browser compatibility
     prevBtn.disabled = currentPage <= 1;
     nextBtn.disabled = currentPage >= totalPages;
   } else {
@@ -484,7 +622,6 @@ function renderRecords() {
     nextBtn.disabled = true;
   }
   
-  // Bind click events
   $$('.record-item').forEach(item => {
     item.addEventListener('click', () => {
       const id = item.dataset.id;
@@ -527,7 +664,7 @@ function openDaySheet(mode, day = null) {
       $('#tradesSection').hidden = false;
       tradeEntries = day.trades?.map(t => ({ ...t })) || [];
       if (tradeEntries.length === 0) {
-        tradeEntries.push({ symbol: '', profit: '' });
+        tradeEntries.push(createEmptyTrade());
       }
     } else {
       $('#tradesSection').hidden = true;
@@ -536,6 +673,16 @@ function openDaySheet(mode, day = null) {
   }
   
   sheet.setAttribute('aria-hidden', 'false');
+}
+
+function createEmptyTrade() {
+  return {
+    symbol: '',
+    action: 'buy',
+    market: 'tse',
+    quantity: '',
+    price: ''
+  };
 }
 
 function closeDaySheet() {
@@ -553,7 +700,7 @@ function setStatusSelection(status) {
   if (status === 'open') {
     $('#tradesSection').hidden = false;
     if (tradeEntries.length === 0) {
-      tradeEntries.push({ symbol: '', profit: '' });
+      tradeEntries.push(createEmptyTrade());
     }
     renderTradeEntries();
   } else {
@@ -570,29 +717,55 @@ function renderTradeEntries() {
     
     return `
       <div class="trade-entry" data-index="${index}">
-        <div class="trade-input-group">
-          <input type="text" 
-                 class="form-input symbol-input" 
-                 placeholder="股票代码" 
-                 value="${trade.symbol || ''}"
-                 data-field="symbol" />
-          <div class="company-name-hint ${showCompanyName ? 'visible' : ''}" data-hint-index="${index}">
-            ${showCompanyName ? companyName : ''}
+        <div class="trade-row">
+          <div class="trade-input-group symbol-group">
+            <input type="text" 
+                   class="form-input symbol-input" 
+                   placeholder="股票代码" 
+                   value="${trade.symbol || ''}"
+                   data-field="symbol" />
+            <div class="company-name-hint ${showCompanyName ? 'visible' : ''}" data-hint-index="${index}">
+              ${showCompanyName ? companyName : ''}
+            </div>
           </div>
-          </div>
-        <input type="number" 
-               class="form-input profit-input" 
-               placeholder="损益 (¥)" 
-               value="${trade.profit || ''}"
-               step="0.01"
-               data-field="profit" />
-        <button type="button" class="remove-trade-btn" ${tradeEntries.length <= 1 ? 'style="visibility:hidden"' : ''}>×</button>
+          <button type="button" class="remove-trade-btn" ${tradeEntries.length <= 1 ? 'style="visibility:hidden"' : ''}>×</button>
         </div>
+        <div class="trade-row">
+          <div class="trade-select-group">
+            <select class="form-select action-select" data-field="action">
+              <option value="buy" ${trade.action === 'buy' ? 'selected' : ''}>买入</option>
+              <option value="sell" ${trade.action === 'sell' ? 'selected' : ''}>卖出</option>
+            </select>
+            <select class="form-select market-select" data-field="market">
+              <option value="tse" ${trade.market === 'tse' ? 'selected' : ''}>东证</option>
+              <option value="pts" ${trade.market === 'pts' ? 'selected' : ''}>PTS</option>
+            </select>
+          </div>
+        </div>
+        <div class="trade-row">
+          <input type="number" 
+                 class="form-input quantity-input" 
+                 placeholder="数量" 
+                 value="${trade.quantity || ''}"
+                 min="1"
+                 step="1"
+                 data-field="quantity" />
+          <input type="number" 
+                 class="form-input price-input" 
+                 placeholder="单价 (¥)" 
+                 value="${trade.price || ''}"
+                 step="0.01"
+                 data-field="price" />
+        </div>
+        <div class="trade-amount">
+          金额: ${formatMoneyShort((Number(trade.quantity) || 0) * (Number(trade.price) || 0))}
+        </div>
+      </div>
     `;
   }).join('');
   
   // Bind input events
-  container.querySelectorAll('.form-input').forEach(input => {
+  container.querySelectorAll('.form-input, .form-select').forEach(input => {
     input.addEventListener('input', (e) => {
       const entry = e.target.closest('.trade-entry');
       const index = parseInt(entry.dataset.index);
@@ -614,6 +787,22 @@ function renderTradeEntries() {
         }
       }
       
+      // Update amount display
+      if (field === 'quantity' || field === 'price') {
+        const amountEl = entry.querySelector('.trade-amount');
+        const qty = Number(tradeEntries[index].quantity) || 0;
+        const price = Number(tradeEntries[index].price) || 0;
+        amountEl.textContent = `金额: ${formatMoneyShort(qty * price)}`;
+      }
+      
+      updateDailyTotal();
+    });
+    
+    input.addEventListener('change', (e) => {
+      const entry = e.target.closest('.trade-entry');
+      const index = parseInt(entry.dataset.index);
+      const field = e.target.dataset.field;
+      tradeEntries[index][field] = e.target.value;
       updateDailyTotal();
     });
   });
@@ -633,12 +822,68 @@ function renderTradeEntries() {
 }
 
 function updateDailyTotal() {
-  const total = tradeEntries.reduce((sum, t) => sum + (Number(t.profit) || 0), 0);
+  // Calculate estimated profit for today's sells
+  const currentDate = $('#fDate').value;
+  const holdingsBeforeDay = calculateHoldings(
+    new Date(new Date(currentDate).getTime() - 86400000).toISOString().split('T')[0]
+  );
+  
+  let estimatedProfit = 0;
+  const tempHoldings = new Map();
+  
+  // Deep copy holdings
+  for (const [symbol, holding] of holdingsBeforeDay) {
+    tempHoldings.set(symbol, { ...holding });
+  }
+  
+  for (const trade of tradeEntries) {
+    if (!trade.symbol || !trade.quantity || !trade.price) continue;
+    
+    const symbol = trade.symbol.toUpperCase();
+    const quantity = Number(trade.quantity) || 0;
+    const price = Number(trade.price) || 0;
+    
+    if (trade.action === 'sell') {
+      const holding = tempHoldings.get(symbol);
+      if (holding && holding.quantity > 0) {
+        const sellQuantity = Math.min(quantity, holding.quantity);
+        const costBasis = sellQuantity * holding.avgPrice;
+        const revenue = sellQuantity * price;
+        estimatedProfit += revenue - costBasis;
+      }
+    }
+    
+    // Update temp holdings
+    if (!tempHoldings.has(symbol)) {
+      tempHoldings.set(symbol, { quantity: 0, totalCost: 0, avgPrice: 0 });
+    }
+    
+    const holding = tempHoldings.get(symbol);
+    
+    if (trade.action === 'buy') {
+      holding.totalCost += quantity * price;
+      holding.quantity += quantity;
+      holding.avgPrice = holding.quantity > 0 ? holding.totalCost / holding.quantity : 0;
+    } else if (trade.action === 'sell') {
+      const sellQuantity = Math.min(quantity, holding.quantity);
+      const costBasis = sellQuantity * holding.avgPrice;
+      holding.totalCost -= costBasis;
+      holding.quantity -= sellQuantity;
+      if (holding.quantity <= 0) {
+        holding.quantity = 0;
+        holding.totalCost = 0;
+        holding.avgPrice = 0;
+      } else {
+        holding.avgPrice = holding.totalCost / holding.quantity;
+      }
+    }
+  }
+  
   const el = $('#dailyTotal');
-  el.textContent = formatMoney(total);
+  el.textContent = formatMoney(estimatedProfit);
   el.className = 'daily-total';
-  if (total > 0) el.classList.add('positive');
-  else if (total < 0) el.classList.add('negative');
+  if (estimatedProfit > 0) el.classList.add('positive');
+  else if (estimatedProfit < 0) el.classList.add('negative');
 }
 
 // ===== Settings Sheet =====
@@ -664,7 +909,9 @@ function closeAnalysisPage() {
 
 function updateAnalysisPage() {
   updateAnalysisSummary();
+  updateHoldingsList();
   updateStockRanking();
+  updateTradingStats();
   updateMonthlyChart();
   updateBestWorstDays();
 }
@@ -678,7 +925,7 @@ function updateAnalysisSummary() {
   const stockSet = new Set();
   
   openDays.forEach(day => {
-    const dayProfit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+    const dayProfit = calculateDayProfit(day);
     totalProfit += dayProfit;
     
     if (dayProfit > 0) winDays++;
@@ -698,30 +945,122 @@ function updateAnalysisSummary() {
   $('#analysisStockCount').textContent = stockSet.size;
 }
 
+function updateHoldingsList() {
+  const container = $('#holdingsList');
+  const holdings = calculateHoldings();
+  
+  if (holdings.size === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📦</div>
+        <div class="empty-title">暂无持仓</div>
+      </div>
+    `;
+    return;
+  }
+  
+  const holdingsArray = Array.from(holdings.entries())
+    .map(([symbol, data]) => ({ symbol, ...data }))
+    .sort((a, b) => (b.quantity * b.avgPrice) - (a.quantity * a.avgPrice));
+  
+  container.innerHTML = holdingsArray.map(holding => {
+    const displayName = getStockDisplayName(holding.symbol);
+    const totalValue = holding.quantity * holding.avgPrice;
+    const marketLabel = holding.market === 'pts' ? 'PTS' : '东证';
+    
+    return `
+      <div class="holding-item">
+        <div class="holding-info">
+          <div class="holding-name">${displayName}</div>
+          <div class="holding-details">${holding.symbol} · ${marketLabel}</div>
+        </div>
+        <div class="holding-data">
+          <div class="holding-quantity">${holding.quantity}股</div>
+          <div class="holding-avg">均价: ${formatMoneyShort(holding.avgPrice)}</div>
+          <div class="holding-value">市值: ${formatMoneyShort(totalValue)}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
 function updateStockRanking() {
   const container = $('#stockRanking');
   
-  // Aggregate profit by stock symbol
+  // Aggregate realized profit by stock symbol
   const stockMap = new Map();
   
   DAYS.forEach(day => {
     if (day.status !== 'open') return;
-    day.trades?.forEach(t => {
-      if (!t.symbol) return;
-      const symbol = t.symbol.toUpperCase();
-      const profit = Number(t.profit) || 0;
+    
+    // Get holdings before this day
+    const holdingsBeforeDay = calculateHoldings(
+      new Date(new Date(day.date).getTime() - 86400000).toISOString().split('T')[0]
+    );
+    
+    const tempHoldings = new Map();
+    for (const [symbol, holding] of holdingsBeforeDay) {
+      tempHoldings.set(symbol, { ...holding });
+    }
+    
+    day.trades?.forEach(trade => {
+      if (!trade.symbol) return;
+      const symbol = trade.symbol.toUpperCase();
       
       if (!stockMap.has(symbol)) {
-        stockMap.set(symbol, { symbol, profit: 0, tradeCount: 0 });
+        stockMap.set(symbol, { symbol, profit: 0, buyCount: 0, sellCount: 0 });
       }
       const stock = stockMap.get(symbol);
-      stock.profit += profit;
-      stock.tradeCount++;
+      
+      if (trade.action === 'buy') {
+        stock.buyCount++;
+      } else if (trade.action === 'sell') {
+        stock.sellCount++;
+        // Calculate profit for this sell
+        const holding = tempHoldings.get(symbol);
+        if (holding && holding.quantity > 0) {
+          const sellQuantity = Math.min(Number(trade.quantity) || 0, holding.quantity);
+          const sellPrice = Number(trade.price) || 0;
+          const costBasis = sellQuantity * holding.avgPrice;
+          const revenue = sellQuantity * sellPrice;
+          stock.profit += revenue - costBasis;
+        }
+      }
+      
+      // Update temp holdings
+      if (trade.quantity && trade.price) {
+        const quantity = Number(trade.quantity) || 0;
+        const price = Number(trade.price) || 0;
+        
+        if (!tempHoldings.has(symbol)) {
+          tempHoldings.set(symbol, { quantity: 0, totalCost: 0, avgPrice: 0 });
+        }
+        
+        const holding = tempHoldings.get(symbol);
+        
+        if (trade.action === 'buy') {
+          holding.totalCost += quantity * price;
+          holding.quantity += quantity;
+          holding.avgPrice = holding.quantity > 0 ? holding.totalCost / holding.quantity : 0;
+        } else if (trade.action === 'sell') {
+          const sellQuantity = Math.min(quantity, holding.quantity);
+          const costBasis = sellQuantity * holding.avgPrice;
+          holding.totalCost -= costBasis;
+          holding.quantity -= sellQuantity;
+          if (holding.quantity <= 0) {
+            holding.quantity = 0;
+            holding.totalCost = 0;
+            holding.avgPrice = 0;
+          } else {
+            holding.avgPrice = holding.totalCost / holding.quantity;
+          }
+        }
+      }
     });
   });
   
-  // Sort by profit (highest to lowest)
   const stocks = Array.from(stockMap.values())
+    .filter(s => s.sellCount > 0) // Only show stocks with realized profits
     .sort((a, b) => b.profit - a.profit);
   
   if (stocks.length === 0) {
@@ -730,7 +1069,7 @@ function updateStockRanking() {
         <div class="empty-icon">📈</div>
         <div class="empty-title">暂无数据</div>
         <div class="empty-desc">开始记录交易后这里会显示排行</div>
-        </div>
+      </div>
     `;
     return;
   }
@@ -750,7 +1089,7 @@ function updateStockRanking() {
         <div class="rank-number ${rankClass}">${index + 1}</div>
         <div class="stock-rank-info">
           <div class="stock-rank-symbol">${displayName}</div>
-          <div class="stock-rank-trades">${showCode ? `${stock.symbol} · ` : ''}${stock.tradeCount}次交易</div>
+          <div class="stock-rank-trades">${showCode ? `${stock.symbol} · ` : ''}买${stock.buyCount}/卖${stock.sellCount}</div>
         </div>
         <div class="stock-rank-profit ${profitClass}">${formatMoney(stock.profit)}</div>
       </div>
@@ -758,16 +1097,38 @@ function updateStockRanking() {
   }).join('');
 }
 
+function updateTradingStats() {
+  let totalBuyCount = 0;
+  let totalSellCount = 0;
+  let tradingDays = 0;
+  
+  DAYS.forEach(day => {
+    if (day.status !== 'open') return;
+    
+    const hasTrades = day.trades && day.trades.length > 0;
+    if (hasTrades) tradingDays++;
+    
+    day.trades?.forEach(trade => {
+      if (trade.action === 'buy') totalBuyCount++;
+      else if (trade.action === 'sell') totalSellCount++;
+    });
+  });
+  
+  const avgDaily = tradingDays > 0 ? ((totalBuyCount + totalSellCount) / tradingDays).toFixed(1) : 0;
+  
+  $('#totalBuyCount').textContent = totalBuyCount;
+  $('#totalSellCount').textContent = totalSellCount;
+  $('#avgDailyTrades').textContent = avgDaily;
+}
+
 function updateMonthlyChart() {
   const ctx = $('#monthlyChart');
   if (!ctx) return;
   
-  // Destroy existing chart
   if (monthlyChart) {
     monthlyChart.destroy();
   }
   
-  // Aggregate profit by month
   const monthMap = new Map();
   
   DAYS.forEach(day => {
@@ -775,7 +1136,7 @@ function updateMonthlyChart() {
     const date = new Date(day.date);
     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
     
-    const dayProfit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+    const dayProfit = calculateDayProfit(day);
     
     if (!monthMap.has(key)) {
       monthMap.set(key, 0);
@@ -783,7 +1144,6 @@ function updateMonthlyChart() {
     monthMap.set(key, monthMap.get(key) + dayProfit);
   });
   
-  // Sort by month
   const sortedMonths = Array.from(monthMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   
   const labels = sortedMonths.map(([key]) => {
@@ -870,13 +1230,11 @@ function updateBestWorstDays() {
     return;
   }
   
-  // Calculate profit for each day
   const daysWithProfit = openDays.map(day => {
-    const profit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+    const profit = calculateDayProfit(day);
     return { ...day, totalProfit: profit };
   });
   
-  // Find best and worst
   const sorted = [...daysWithProfit].sort((a, b) => b.totalProfit - a.totalProfit);
   const best = sorted[0];
   const worst = sorted[sorted.length - 1];
@@ -939,10 +1297,8 @@ function calculateDividend(profit) {
   const ratio = dividendNumerator / dividendDenominator;
   
   if (profit >= 0) {
-    // Profit: dividend = profit * ratio * 80% (after tax), round up to integer
     return Math.ceil(profit * ratio * 0.8);
   } else {
-    // Loss: share = loss * ratio * 100%, round up (more negative) to integer
     return Math.floor(profit * ratio);
   }
 }
@@ -968,7 +1324,7 @@ function updateTodayDividend() {
     return;
   }
   
-  const profit = todayDay.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+  const profit = calculateDayProfit(todayDay);
   const dividend = calculateDividend(profit);
   
   const dateInfo = formatDate(today);
@@ -986,17 +1342,16 @@ function updateTodayDividend() {
 function updateDividendHistory() {
   const container = $('#dividendHistory');
   
-  // Get all open days with profit, sorted by date (newest first)
   const openDays = DAYS
     .filter(d => d.status === 'open')
     .map(day => {
-      const profit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+      const profit = calculateDayProfit(day);
       const dividend = calculateDividend(profit);
       return { ...day, profit, dividend };
     })
     .filter(d => d.profit !== 0)
     .sort((a, b) => new Date(b.date) - new Date(a.date))
-    .slice(0, 10); // Show last 10 records
+    .slice(0, 10);
   
   if (openDays.length === 0) {
     container.innerHTML = `
@@ -1030,7 +1385,7 @@ function updateDividendSummary() {
   
   DAYS.forEach(day => {
     if (day.status !== 'open') return;
-    const profit = day.trades?.reduce((sum, t) => sum + (Number(t.profit) || 0), 0) || 0;
+    const profit = calculateDayProfit(day);
     const dividend = calculateDividend(profit);
     
     if (dividend >= 0) {
@@ -1054,7 +1409,7 @@ function updateDividendSummary() {
 function getExportData() {
   return {
     exportedAt: new Date().toISOString(),
-    version: '2.1',
+    version: '3.0',
     days: DAYS
   };
 }
@@ -1085,7 +1440,6 @@ async function exportDataToClipboard() {
     await navigator.clipboard.writeText(text);
     alert('已复制到剪贴板！');
   } catch (err) {
-    // Fallback for older browsers
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.style.position = 'fixed';
@@ -1096,6 +1450,30 @@ async function exportDataToClipboard() {
     textarea.remove();
     alert('已复制到剪贴板！');
   }
+}
+
+// Convert old format trades to new format
+function convertOldTrade(trade) {
+  // Old format: { symbol, profit }
+  // New format: { symbol, action, market, quantity, price }
+  if (trade.action) {
+    // Already new format
+    return trade;
+  }
+  
+  // Convert old format - assume it was a sell with profit
+  const profit = Number(trade.profit) || 0;
+  if (profit !== 0) {
+    return {
+      symbol: trade.symbol || '',
+      action: 'sell',
+      market: 'tse',
+      quantity: 100, // Default quantity
+      price: Math.abs(profit / 100) // Estimate price from profit
+    };
+  }
+  
+  return null;
 }
 
 async function importDataFromText(text) {
@@ -1113,11 +1491,19 @@ async function importDataFromText(text) {
     
     for (const day of days) {
       if (!day || !day.id) continue;
+      
+      // Convert old format trades if necessary
+      let trades = day.trades || [];
+      if (trades.length > 0 && !trades[0].action) {
+        // Old format detected, convert
+        trades = trades.map(convertOldTrade).filter(Boolean);
+      }
+      
       await saveDay({
         id: day.id,
         date: day.date,
         status: day.status || 'open',
-        trades: day.trades || [],
+        trades: trades,
         updatedAt: new Date().toISOString()
       });
     }
@@ -1135,7 +1521,7 @@ async function importData(file) {
     
     alert('导入成功！');
     closeSettings();
-  await refresh();
+    await refresh();
   } catch (err) {
     alert('导入失败：' + (err.message || err));
   }
@@ -1224,7 +1610,7 @@ function bindEvents() {
   
   // Add trade button
   $('#btnAddTrade').addEventListener('click', () => {
-    tradeEntries.push({ symbol: '', profit: '' });
+    tradeEntries.push(createEmptyTrade());
     renderTradeEntries();
   });
   
@@ -1255,11 +1641,16 @@ function bindEvents() {
       }
     }
     
+    // Filter valid trades
+    const validTrades = status === 'open' 
+      ? tradeEntries.filter(t => t.symbol && t.quantity && t.price)
+      : [];
+    
     const day = {
       id,
       date,
       status,
-      trades: status === 'open' ? tradeEntries.filter(t => t.symbol || t.profit) : [],
+      trades: validTrades,
       updatedAt: new Date().toISOString()
     };
     
@@ -1275,21 +1666,18 @@ function bindEvents() {
     if (confirm('确定要删除这条记录吗？')) {
       await deleteDay(currentEditDay.id);
       closeDaySheet();
-  await refresh();
+      await refresh();
     }
   });
   
   // Month filter
   const monthFilterEl = $('#monthFilter');
   monthFilterEl.addEventListener('change', (e) => {
-    console.log('monthFilter changed to:', e.target.value);
     currentFilter = e.target.value;
-    currentPage = 1; // Reset to first page when filter changes
+    currentPage = 1;
     renderRecords();
   });
-  // Also handle input event for better Safari compatibility
   monthFilterEl.addEventListener('input', (e) => {
-    console.log('monthFilter input:', e.target.value);
     currentFilter = e.target.value;
     currentPage = 1;
     renderRecords();
@@ -1300,7 +1688,6 @@ function bindEvents() {
   const nextBtn = $('#btnNextPage');
   
   prevBtn.addEventListener('click', () => {
-    console.log('prevBtn clicked, currentPage:', currentPage);
     if (prevBtn.disabled) return;
     if (currentPage > 1) {
       currentPage--;
@@ -1310,7 +1697,6 @@ function bindEvents() {
   });
   
   nextBtn.addEventListener('click', () => {
-    console.log('nextBtn clicked, currentPage:', currentPage);
     if (nextBtn.disabled) return;
     const filteredDays = getFilteredDays();
     const totalPages = Math.ceil(filteredDays.length / RECORDS_PER_PAGE);
@@ -1335,13 +1721,11 @@ function bindEvents() {
   $('#btnCloseSettings').addEventListener('click', closeSettings);
   $('#settingsBackdrop').addEventListener('click', closeSettings);
   
-  // Export (download file)
+  // Export
   $('#btnExport').addEventListener('click', exportData);
-  
-  // Export (copy to clipboard)
   $('#btnExportCopy').addEventListener('click', exportDataToClipboard);
   
-  // Import (from file)
+  // Import
   $('#fileImport').addEventListener('change', (e) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -1350,7 +1734,6 @@ function bindEvents() {
     }
   });
   
-  // Import (paste text)
   $('#btnImportPaste').addEventListener('click', openImportPasteSheet);
   $('#btnCloseImportPaste').addEventListener('click', closeImportPasteSheet);
   $('#btnCancelImportPaste').addEventListener('click', closeImportPasteSheet);
@@ -1362,11 +1745,11 @@ function bindEvents() {
     if (confirm('确定要清空所有数据吗？此操作不可撤销！')) {
       await clearAllDays();
       closeSettings();
-    await refresh();
+      await refresh();
     }
   });
   
-  // Theme change listener - 使用兼容写法支持旧浏览器
+  // Theme change listener
   const mql = window.matchMedia('(prefers-color-scheme: dark)');
   
   const onThemeChange = () => {
@@ -1380,22 +1763,16 @@ function bindEvents() {
     }
   };
   
-  // 兼容新旧浏览器
   if (mql.addEventListener) {
     mql.addEventListener('change', onThemeChange);
   } else if (mql.addListener) {
-    // 旧浏览器 / 旧 WebView
     mql.addListener(onThemeChange);
   }
-  
-  console.log('bindEvents ok');
 }
 
 // ===== Initialize =====
 async function init() {
-  // Load company data first
   await loadCompanyData();
-  
   initChart();
   bindEvents();
   await refresh();
