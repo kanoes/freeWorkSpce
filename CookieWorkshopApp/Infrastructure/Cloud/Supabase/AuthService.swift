@@ -2,20 +2,20 @@ import Foundation
 import Supabase
 import AuthenticationServices
 
-protocol AuthServiceProtocol {
+protocol AuthServiceProtocol: Sendable {
     func signInWithApple(credential: ASAuthorizationAppleIDCredential) async throws -> User
     func signOut() async throws
     func currentUser() async -> User?
     func observeAuthState() -> AsyncStream<User?>
 }
 
-struct User: Identifiable, Hashable {
+struct User: Identifiable, Hashable, Sendable {
     let id: UUID
     let email: String?
     let createdAt: Date
 }
 
-final class AuthService: AuthServiceProtocol {
+final class AuthService: AuthServiceProtocol, @unchecked Sendable {
     
     private let supabase: SupabaseClient
     
@@ -61,7 +61,8 @@ final class AuthService: AuthServiceProtocol {
     
     func observeAuthState() -> AsyncStream<User?> {
         AsyncStream { continuation in
-            let task = Task {
+            let supabase = self.supabase
+            let task = Task { @Sendable in
                 for await (event, session) in supabase.auth.authStateChanges {
                     switch event {
                     case .signedIn, .tokenRefreshed:
@@ -81,7 +82,7 @@ final class AuthService: AuthServiceProtocol {
                 }
             }
             
-            continuation.onTermination = { _ in
+            continuation.onTermination = { @Sendable _ in
                 task.cancel()
             }
         }

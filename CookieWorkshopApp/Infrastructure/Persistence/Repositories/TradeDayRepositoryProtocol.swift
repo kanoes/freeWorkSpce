@@ -1,6 +1,6 @@
 import Foundation
 
-protocol TradeDayRepositoryProtocol {
+protocol TradeDayRepositoryProtocol: Sendable {
     func fetchAll() async throws -> [TradeDay]
     func fetchByDate(_ date: LocalDate) async throws -> TradeDay?
     func fetchById(_ id: UUID) async throws -> TradeDay?
@@ -9,5 +9,6 @@ protocol TradeDayRepositoryProtocol {
     func fetchDirty() async throws -> [TradeDay]
     func markClean(_ ids: [UUID]) async throws
     func deleteAll() async throws
+    func upsertFromRemote(_ day: TradeDay) async throws
 }
 

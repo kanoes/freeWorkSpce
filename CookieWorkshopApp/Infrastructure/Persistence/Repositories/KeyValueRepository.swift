@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-final class KeyValueRepository {
+final class KeyValueRepository: @unchecked Sendable {
     
     private let database: DatabasePool
     

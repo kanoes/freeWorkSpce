@@ -35,8 +35,7 @@ actor SyncEngine {
         
         try await remoteDataSource.upsert(dirtyDays, userId: userId)
         
-        let ids = dirtyDays.map { $0.id }
-        try await localRepository.markClean(ids)
+        try await localRepository.markClean(dirtyDays.map(\.id))
     }
     
     private func pull(userId: String) async throws {
@@ -55,13 +54,12 @@ actor SyncEngine {
     
     private func mergeRemoteDay(_ remoteDay: TradeDay) async throws {
         guard let localDay = try await localRepository.fetchById(remoteDay.id) else {
-            try await (localRepository as? TradeDayRepository)?.upsertFromRemote(remoteDay)
+            try await localRepository.upsertFromRemote(remoteDay)
             return
         }
         
         if localDay.updatedAt < remoteDay.updatedAt {
-            try await (localRepository as? TradeDayRepository)?.upsertFromRemote(remoteDay)
+            try await localRepository.upsertFromRemote(remoteDay)
         }
     }
 }
-

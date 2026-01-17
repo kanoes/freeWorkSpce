@@ -1,12 +1,12 @@
 import Foundation
 import Supabase
 
-protocol TradeDayRemoteDataSourceProtocol {
+protocol TradeDayRemoteDataSourceProtocol: Sendable {
     func upsert(_ days: [TradeDay], userId: String) async throws
     func fetchUpdated(since: Date, userId: String) async throws -> [TradeDay]
 }
 
-final class TradeDayRemoteDataSource: TradeDayRemoteDataSourceProtocol {
+final class TradeDayRemoteDataSource: TradeDayRemoteDataSourceProtocol, @unchecked Sendable {
     
     private let supabase: SupabaseClient
     private let tableName = "trade_days"

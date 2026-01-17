@@ -1,6 +1,6 @@
 import Foundation
 
-protocol CompanyLookupServiceProtocol {
+protocol CompanyLookupServiceProtocol: Sendable {
     func getCompany(byCode code: String) -> Company?
     func getCompanyName(forCode code: String) -> String
     func loadCompanies() async throws

@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-final class TradeDayRepository: TradeDayRepositoryProtocol {
+final class TradeDayRepository: TradeDayRepositoryProtocol, @unchecked Sendable {
     
     private let database: DatabasePool
     
