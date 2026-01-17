@@ -1,0 +1,26 @@
+--swiftversion 5.9
+--indent 4
+--indentcase false
+--trimwhitespace always
+--voidtype void
+--nospaceoperators ...,..<
+--ifdef no-indent
+--stripunusedargs closure-only
+--maxwidth 120
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--funcattributes prev-line
+--typeattributes prev-line
+--varattributes same-line
+--disable redundantSelf
+--disable trailingCommas
+--enable isEmpty
+--enable sortedImports
+--enable consecutiveSpaces
+--enable duplicateImports
+--enable redundantParens
+--enable redundantReturn
+--enable redundantType
+--enable unusedArguments
+
