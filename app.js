@@ -1558,6 +1558,39 @@ async function exportDataToClipboard() {
   }
 }
 
+async function exportTodayDataToClipboard() {
+  const today = todayStr();
+  const day = DAYS.find(d => d.date === today);
+  
+  if (!day) {
+    alert('今日暂无交易记录');
+    return;
+  }
+  
+  const data = {
+    exportedAt: new Date().toISOString(),
+    type: 'today',
+    version: '3.0',
+    days: [day]
+  };
+  const text = JSON.stringify(data, null, 2);
+  
+  try {
+    await navigator.clipboard.writeText(text);
+    alert('已复制今日数据到剪贴板！');
+  } catch (err) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    textarea.remove();
+    alert('已复制今日数据到剪贴板！');
+  }
+}
+
 // Convert old format trades to new format
 function convertOldTrade(trade) {
   // Old format: { symbol, profit }
@@ -1633,10 +1666,60 @@ async function importData(file) {
   }
 }
 
+/** 导入今日数据并合并到现有记录（不覆盖，同日期则合并交易） */
+async function importTodayFromText(text) {
+  const data = JSON.parse(text);
+  const days = data.days || (data.day ? [data.day] : (Array.isArray(data) ? data : []));
+  
+  if (!Array.isArray(days) || days.length === 0) {
+    throw new Error('没有找到有效的今日数据');
+  }
+  
+  for (const day of days) {
+    if (!day || !day.date) continue;
+    
+    let trades = (day.trades || []).map(t => convertOldTrade(t)).filter(Boolean);
+    
+    const existing = await getDayByDate(day.date);
+    if (existing) {
+      const mergedTrades = [...(existing.trades || []), ...trades];
+      await saveDay({
+        ...existing,
+        trades: mergedTrades,
+        updatedAt: new Date().toISOString()
+      });
+    } else {
+      await saveDay({
+        id: day.id || generateId(),
+        date: day.date,
+        status: day.status || 'open',
+        trades: trades,
+        updatedAt: new Date().toISOString()
+      });
+    }
+  }
+  
+  return true;
+}
+
 // ===== Import Paste Sheet =====
-function openImportPasteSheet() {
+/** @param {'replace'|'mergeToday'} mode - replace=覆盖同日期, mergeToday=合并到现有（不覆盖） */
+function openImportPasteSheet(mode = 'replace') {
+  const sheet = $('#importPasteSheet');
+  sheet.dataset.importMode = mode;
   $('#importPasteText').value = '';
-  $('#importPasteSheet').setAttribute('aria-hidden', 'false');
+  
+  const titleEl = sheet.querySelector('.sheet-title');
+  const subtitleEl = sheet.querySelector('.sheet-subtitle');
+  if (mode === 'mergeToday') {
+    titleEl.textContent = '导入今日数据';
+    subtitleEl.textContent = '粘贴导出的今日数据，将合并到现有记录（不覆盖）';
+  } else {
+    titleEl.textContent = '粘贴导入';
+    subtitleEl.textContent = '将复制的数据粘贴到下方';
+  }
+  
+  sheet.setAttribute('aria-hidden', 'false');
 }
 
 function closeImportPasteSheet() {
@@ -1652,9 +1735,16 @@ async function confirmImportPaste() {
     return;
   }
   
+  const mode = $('#importPasteSheet').dataset.importMode || 'replace';
+  
   try {
-    await importDataFromText(text);
-    alert('导入成功！');
+    if (mode === 'mergeToday') {
+      await importTodayFromText(text);
+      alert('导入成功！已合并到现有记录');
+    } else {
+      await importDataFromText(text);
+      alert('导入成功！');
+    }
     closeImportPasteSheet();
     closeSettings();
     await refresh();
@@ -1866,6 +1956,7 @@ function bindEvents() {
   // Export
   $('#btnExport').addEventListener('click', exportData);
   $('#btnExportCopy').addEventListener('click', exportDataToClipboard);
+  $('#btnExportTodayCopy').addEventListener('click', exportTodayDataToClipboard);
   
   // Import
   $('#fileImport').addEventListener('change', (e) => {
@@ -1876,7 +1967,8 @@ function bindEvents() {
     }
   });
   
-  $('#btnImportPaste').addEventListener('click', openImportPasteSheet);
+  $('#btnImportPaste').addEventListener('click', () => openImportPasteSheet('replace'));
+  $('#btnImportToday').addEventListener('click', () => openImportPasteSheet('mergeToday'));
   $('#btnCloseImportPaste').addEventListener('click', closeImportPasteSheet);
   $('#btnCancelImportPaste').addEventListener('click', closeImportPasteSheet);
   $('#importPasteBackdrop').addEventListener('click', closeImportPasteSheet);
