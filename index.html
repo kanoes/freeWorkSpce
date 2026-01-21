@@ -65,12 +65,18 @@
 
       <!-- Chart Section -->
       <section class="card chart-card">
-        <div class="card-header">
+        <div class="card-header chart-header">
           <h2>收益趋势</h2>
-          <div class="chart-tabs">
-            <button class="chart-tab active" data-range="week">周</button>
-            <button class="chart-tab" data-range="month">月</button>
-            <button class="chart-tab" data-range="all">全部</button>
+          <div class="chart-tabs-row">
+            <div class="chart-tabs">
+              <button class="chart-tab active" data-range="week">周</button>
+              <button class="chart-tab" data-range="month">月</button>
+              <button class="chart-tab" data-range="all">全部</button>
+            </div>
+            <div class="chart-tabs chart-tabs-type">
+              <button class="chart-tab active" data-type="cumulative">累计</button>
+              <button class="chart-tab" data-type="daily">每日</button>
+            </div>
           </div>
         </div>
         <div class="chart-container">
@@ -294,12 +300,25 @@
       <!-- Today's Dividend -->
       <section class="card">
         <div class="card-header">
-          <h2>🎁 今日分红</h2>
+          <h2>🎁 本日分红</h2>
         </div>
         <div class="today-dividend" id="todayDividend">
           <div class="dividend-empty">
             <div class="empty-icon">📅</div>
             <div class="empty-title">今日暂无交易记录</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Week's Dividend -->
+      <section class="card">
+        <div class="card-header">
+          <h2>📆 本周分红</h2>
+        </div>
+        <div class="today-dividend" id="weekDividend">
+          <div class="dividend-empty">
+            <div class="empty-icon">📅</div>
+            <div class="empty-title">本周暂无交易记录</div>
           </div>
         </div>
       </section>

@@ -288,6 +288,12 @@ body::before {
   padding-bottom: 16px;
 }
 
+.chart-tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .chart-tabs {
   display: flex;
   gap: 4px;

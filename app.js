@@ -444,7 +444,7 @@ function initChart() {
   });
 }
 
-function updateChart(range = 'week') {
+function updateChart(range = 'week', chartType = 'cumulative') {
   if (!profitChart) return;
   
   const openDays = DAYS
@@ -461,35 +461,50 @@ function updateChart(range = 'week') {
     filteredDays = openDays.filter(d => new Date(d.date) >= monthAgo);
   }
   
-  let cumulative = 0;
-  const labels = [];
-  const data = [];
-  
-  filteredDays.forEach(day => {
-    const profit = calculateDayProfit(day);
-    cumulative += profit;
-    
+  const labels = filteredDays.map(day => {
     const dateInfo = formatDate(day.date);
-    labels.push(`${dateInfo.month}${dateInfo.day}日`);
-    data.push(cumulative);
+    return `${dateInfo.month}${dateInfo.day}日`;
   });
+  
+  let data;
+  if (chartType === 'daily') {
+    data = filteredDays.map(day => calculateDayProfit(day));
+  } else {
+    let cumulative = 0;
+    data = filteredDays.map(day => {
+      cumulative += calculateDayProfit(day);
+      return cumulative;
+    });
+  }
   
   profitChart.data.labels = labels;
   profitChart.data.datasets[0].data = data;
+  profitChart.data.datasets[0].fill = chartType === 'daily' ? 'origin' : true;
+  
+  profitChart.options.plugins.tooltip.callbacks.label = (item) =>
+    chartType === 'daily' ? `当日: ${formatMoneyShort(item.raw)}` : `累计: ${formatMoneyShort(item.raw)}`;
+  
+  profitChart.options.scales.y.beginAtZero = chartType === 'daily';
   
   const ctx = $('#profitChart').getContext('2d');
-  const gradient = ctx.createLinearGradient(0, 0, 0, 200);
   
-  if (cumulative >= 0) {
-    gradient.addColorStop(0, 'rgba(52, 211, 153, 0.3)');
-    gradient.addColorStop(1, 'rgba(52, 211, 153, 0)');
-    profitChart.data.datasets[0].borderColor = '#34d399';
+  if (chartType === 'daily') {
+    profitChart.data.datasets[0].borderColor = '#f59e0b';
+    profitChart.data.datasets[0].backgroundColor = 'rgba(245, 158, 11, 0.15)';
   } else {
-    gradient.addColorStop(0, 'rgba(248, 113, 113, 0.3)');
-    gradient.addColorStop(1, 'rgba(248, 113, 113, 0)');
-    profitChart.data.datasets[0].borderColor = '#f87171';
+    const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+    const lastVal = data[data.length - 1];
+    if (lastVal >= 0) {
+      gradient.addColorStop(0, 'rgba(52, 211, 153, 0.3)');
+      gradient.addColorStop(1, 'rgba(52, 211, 153, 0)');
+      profitChart.data.datasets[0].borderColor = '#34d399';
+    } else {
+      gradient.addColorStop(0, 'rgba(248, 113, 113, 0.3)');
+      gradient.addColorStop(1, 'rgba(248, 113, 113, 0)');
+      profitChart.data.datasets[0].borderColor = '#f87171';
+    }
+    profitChart.data.datasets[0].backgroundColor = gradient;
   }
-  profitChart.data.datasets[0].backgroundColor = gradient;
   
   profitChart.update();
 }
@@ -1413,8 +1428,57 @@ function calculateDividend(profit) {
 
 function updateDividendPage() {
   updateTodayDividend();
+  updateWeekDividend();
   updateDividendHistory();
   updateDividendSummary();
+}
+
+/** 获取本周一 0 点的日期字符串 (YYYY-MM-DD) */
+function getThisWeekMondayStr() {
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const mondayOffset = (dayOfWeek + 6) % 7;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - mondayOffset);
+  return monday.toISOString().split('T')[0];
+}
+
+function updateWeekDividend() {
+  const container = $('#weekDividend');
+  const mondayStr = getThisWeekMondayStr();
+  const today = todayStr();
+  
+  const weekDays = DAYS.filter(d => d.date >= mondayStr && d.date <= today);
+  
+  if (weekDays.length === 0) {
+    container.innerHTML = `
+      <div class="dividend-empty">
+        <div class="empty-icon">📅</div>
+        <div class="empty-title">本周暂无交易记录</div>
+      </div>
+    `;
+    return;
+  }
+  
+  let totalDividend = 0;
+  let totalProfit = 0;
+  weekDays.forEach(day => {
+    const profit = calculateDayProfit(day);
+    totalProfit += profit;
+    totalDividend += calculateDividend(profit);
+  });
+  
+  const mondayDate = formatDate(mondayStr);
+  const todayDate = formatDate(today);
+  const amountClass = totalDividend > 0 ? 'positive' : (totalDividend < 0 ? 'negative' : 'zero');
+  
+  container.innerHTML = `
+    <div class="dividend-today-card">
+      <div class="dividend-today-date">${mondayDate.month}${mondayDate.day}日 ～ ${todayDate.month}${todayDate.day}日</div>
+      <div class="dividend-today-profit">本周收益: ${formatMoney(totalProfit)}</div>
+      <div class="dividend-today-amount ${amountClass}">${formatMoney(totalDividend)}</div>
+    </div>
+  `;
 }
 
 function updateTodayDividend() {
@@ -1759,7 +1823,9 @@ async function refresh() {
   updateSummary();
   updateMonthFilter();
   renderRecords();
-  updateChart($('.chart-tab.active')?.dataset.range || 'week');
+  const range = $('.chart-tab[data-range].active')?.dataset.range || 'week';
+  const chartType = $('.chart-tab[data-type].active')?.dataset.type || 'cumulative';
+  updateChart(range, chartType);
 }
 
 // ===== Event Bindings =====
@@ -1939,12 +2005,19 @@ function bindEvents() {
     }
   });
   
-  // Chart tabs
+  // Chart tabs: 周/月/全部 与 累计/每日 分组切换
   $$('.chart-tab').forEach(tab => {
     tab.addEventListener('click', () => {
-      $$('.chart-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      updateChart(tab.dataset.range);
+      if (tab.dataset.range) {
+        $$('.chart-tab[data-range]').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+      } else if (tab.dataset.type) {
+        $$('.chart-tab[data-type]').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+      }
+      const range = $('.chart-tab[data-range].active')?.dataset.range || 'week';
+      const chartType = $('.chart-tab[data-type].active')?.dataset.type || 'cumulative';
+      updateChart(range, chartType);
     });
   });
   
@@ -2038,7 +2111,9 @@ function bindEvents() {
     if (profitChart) {
       profitChart.destroy();
       initChart();
-      updateChart($('.chart-tab.active')?.dataset.range || 'week');
+      const range = $('.chart-tab[data-range].active')?.dataset.range || 'week';
+      const chartType = $('.chart-tab[data-type].active')?.dataset.type || 'cumulative';
+      updateChart(range, chartType);
     }
     if (monthlyChart && !$('#analysisPage').hidden) {
       updateMonthlyChart();
