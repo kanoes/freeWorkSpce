@@ -497,6 +497,38 @@
           <span class="chevron">›</span>
         </button>
 
+        <div class="settings-section-title">云同步 (JSONBin)</div>
+        <p class="settings-desc-inline">使用 JSONBin 与对方共享数据，两人需使用相同的 API Key 和 Bin ID。</p>
+        <div class="settings-item api-key-item">
+          <div class="settings-item-content">
+            <span class="settings-icon">🔐</span>
+            <div>
+              <div class="settings-title">JSONBin API Key (Master Key)</div>
+              <div class="settings-desc">在 <a href="https://jsonbin.io" target="_blank" rel="noopener">jsonbin.io</a> 注册后，在 Dashboard 复制</div>
+            </div>
+          </div>
+        </div>
+        <div class="api-key-input-wrapper">
+          <input type="password" id="jsonbinApiKey" class="api-key-input" placeholder="例如 $2a$10$..." />
+        </div>
+        <div class="settings-item api-key-item">
+          <div class="settings-item-content">
+            <span class="settings-icon">📦</span>
+            <div>
+              <div class="settings-title">Bin ID</div>
+              <div class="settings-desc">留空则首次「上传到云端」时自动创建，创建后请把此 ID 发给对方</div>
+            </div>
+          </div>
+        </div>
+        <div class="api-key-input-wrapper">
+          <input type="text" id="jsonbinBinId" class="api-key-input" placeholder="留空则首次上传时自动创建" />
+        </div>
+        <div class="jsonbin-actions">
+          <button type="button" class="btn primary" id="btnJsonbinPush">上传到云端</button>
+          <button type="button" class="btn secondary" id="btnJsonbinPull">从云端拉取</button>
+        </div>
+        <p class="jsonbin-sync-status" id="jsonbinSyncStatus">从未同步</p>
+
         <div class="settings-section-title">AI 助手设置</div>
 
         <div class="settings-item api-key-item">

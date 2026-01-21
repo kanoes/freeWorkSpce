@@ -192,6 +192,11 @@ let chatHistory = [];
 let currentChatMode = null; // 'trade' or 'general'
 let isAILoading = false;
 
+// JSONBin 云同步（与对方共享数据）
+let jsonbinApiKey = localStorage.getItem('jsonbin_api_key') || '';
+let jsonbinBinId = localStorage.getItem('jsonbin_bin_id') || '';
+let isJsonbinSyncing = false;
+
 // ===== Holdings Management =====
 // Calculate holdings based on all trades up to a specific date
 // For each day, process buys first then sells (for day trading support)
@@ -959,6 +964,7 @@ function updateDailyTotal() {
 // ===== Settings Sheet =====
 function openSettings() {
   $('#settingsSheet').setAttribute('aria-hidden', 'false');
+  initJsonbinSyncStatus();
 }
 
 function closeSettings() {
@@ -1817,6 +1823,187 @@ async function confirmImportPaste() {
   }
 }
 
+// ===== JSONBin 云同步 =====
+const JSONBIN_BASE = 'https://api.jsonbin.io/v3/b';
+
+function updateJsonbinSyncStatus(text) {
+  const el = $('#jsonbinSyncStatus');
+  if (el) el.textContent = text;
+}
+
+/** 将云端 days 与本地 DAYS 按日期合并，updatedAt 较新者优先 */
+async function mergeDaysFromCloud(cloudDays) {
+  if (!Array.isArray(cloudDays)) cloudDays = [];
+  const byDate = new Map();
+  for (const d of DAYS) {
+    if (d && d.date) byDate.set(d.date, d);
+  }
+  for (const d of cloudDays) {
+    if (!d || !d.date) continue;
+    const local = byDate.get(d.date);
+    const cloudUpdated = d.updatedAt ? new Date(d.updatedAt).getTime() : 0;
+    const localUpdated = local?.updatedAt ? new Date(local.updatedAt).getTime() : 0;
+    if (!local || cloudUpdated >= localUpdated) {
+      byDate.set(d.date, d);
+    }
+  }
+  const merged = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+  merged.forEach(d => {
+    if (!d.id) d.id = generateId();
+    let trades = d.trades || [];
+    if (trades.length > 0 && !trades[0].action) {
+      trades = trades.map(convertOldTrade).filter(Boolean);
+      d.trades = trades;
+    }
+  });
+  await clearAllDays();
+  for (const day of merged) {
+    await saveDay(day);
+  }
+}
+
+async function pushToJsonBin() {
+  const apiKey = ($('#jsonbinApiKey') && $('#jsonbinApiKey').value) || jsonbinApiKey;
+  let binId = ($('#jsonbinBinId') && $('#jsonbinBinId').value) || jsonbinBinId;
+  binId = binId ? binId.trim() : '';
+
+  if (!apiKey || !apiKey.trim()) {
+    alert('请先在下方填写 JSONBin API Key');
+    return;
+  }
+
+  if (isJsonbinSyncing) return;
+  isJsonbinSyncing = true;
+  updateJsonbinSyncStatus('上传中…');
+  if ($('#btnJsonbinPush')) $('#btnJsonbinPush').disabled = true;
+  if ($('#btnJsonbinPull')) $('#btnJsonbinPull').disabled = true;
+
+  const payload = getExportData();
+
+  try {
+    if (binId) {
+      const res = await fetch(`${JSONBIN_BASE}/${binId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Master-Key': apiKey.trim()
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.message || `上传失败 (${res.status})`);
+      }
+    } else {
+      const res = await fetch(JSONBIN_BASE, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Master-Key': apiKey.trim(),
+          'X-Bin-Name': '甜饼工坊-共享数据'
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.message || `创建失败 (${res.status})`);
+      }
+      const data = await res.json();
+      const id = data?.metadata?.id || data?.id;
+      if (id) {
+        jsonbinBinId = id;
+        localStorage.setItem('jsonbin_bin_id', id);
+        const input = $('#jsonbinBinId');
+        if (input) input.value = id;
+      }
+    }
+
+    jsonbinApiKey = apiKey.trim();
+    localStorage.setItem('jsonbin_api_key', jsonbinApiKey);
+    const at = new Date().toLocaleString('zh-CN');
+    localStorage.setItem('jsonbin_last_sync', JSON.stringify({ at, dir: 'push' }));
+    updateJsonbinSyncStatus(`上次同步：${at}（上传）`);
+    alert('已上传到云端！对方可用相同 API Key 和 Bin ID「从云端拉取」。');
+  } catch (e) {
+    updateJsonbinSyncStatus('');
+    alert('上传失败：' + (e.message || e));
+  } finally {
+    isJsonbinSyncing = false;
+    if ($('#btnJsonbinPush')) $('#btnJsonbinPush').disabled = false;
+    if ($('#btnJsonbinPull')) $('#btnJsonbinPull').disabled = false;
+  }
+}
+
+async function pullFromJsonBin() {
+  const apiKey = ($('#jsonbinApiKey') && $('#jsonbinApiKey').value) || jsonbinApiKey;
+  let binId = ($('#jsonbinBinId') && $('#jsonbinBinId').value) || jsonbinBinId;
+  binId = (binId || '').trim();
+
+  if (!apiKey || !apiKey.trim()) {
+    alert('请先填写 JSONBin API Key');
+    return;
+  }
+  if (!binId) {
+    alert('请填写 Bin ID。若还没有，请对方先「上传到云端」一次，再把 Bin ID 发给你。');
+    return;
+  }
+
+  if (isJsonbinSyncing) return;
+  isJsonbinSyncing = true;
+  updateJsonbinSyncStatus('拉取中…');
+  if ($('#btnJsonbinPush')) $('#btnJsonbinPush').disabled = true;
+  if ($('#btnJsonbinPull')) $('#btnJsonbinPull').disabled = true;
+
+  try {
+    const res = await fetch(`${JSONBIN_BASE}/${binId}?meta=false`, {
+      method: 'GET',
+      headers: { 'X-Master-Key': apiKey.trim() }
+    });
+
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('未找到该 Bin，请检查 Bin ID 是否正确');
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.message || `拉取失败 (${res.status})`);
+    }
+
+    const data = await res.json();
+    const cloudDays = Array.isArray(data?.days) ? data.days : [];
+
+    await mergeDaysFromCloud(cloudDays);
+    await refresh();
+
+    jsonbinApiKey = apiKey.trim();
+    jsonbinBinId = binId;
+    localStorage.setItem('jsonbin_api_key', jsonbinApiKey);
+    localStorage.setItem('jsonbin_bin_id', binId);
+    const at = new Date().toLocaleString('zh-CN');
+    localStorage.setItem('jsonbin_last_sync', JSON.stringify({ at, dir: 'pull' }));
+    updateJsonbinSyncStatus(`上次同步：${at}（拉取）`);
+    alert('已从云端拉取并合并！');
+  } catch (e) {
+    updateJsonbinSyncStatus('');
+    alert('拉取失败：' + (e.message || e));
+  } finally {
+    isJsonbinSyncing = false;
+    if ($('#btnJsonbinPush')) $('#btnJsonbinPush').disabled = false;
+    if ($('#btnJsonbinPull')) $('#btnJsonbinPull').disabled = false;
+  }
+}
+
+function initJsonbinSyncStatus() {
+  try {
+    const raw = localStorage.getItem('jsonbin_last_sync');
+    if (!raw) {
+      updateJsonbinSyncStatus('从未同步');
+      return;
+    }
+    const { at, dir } = JSON.parse(raw);
+    updateJsonbinSyncStatus(`上次同步：${at}（${dir === 'push' ? '上传' : '拉取'}）`);
+  } catch {
+    updateJsonbinSyncStatus('从未同步');
+  }
+}
+
 // ===== Refresh =====
 async function refresh() {
   DAYS = await getAllDays();
@@ -2046,6 +2233,24 @@ function bindEvents() {
   $('#btnCancelImportPaste').addEventListener('click', closeImportPasteSheet);
   $('#importPasteBackdrop').addEventListener('click', closeImportPasteSheet);
   $('#btnConfirmImportPaste').addEventListener('click', confirmImportPaste);
+
+  // JSONBin 云同步
+  const jsonbinApiKeyEl = $('#jsonbinApiKey');
+  const jsonbinBinIdEl = $('#jsonbinBinId');
+  if (jsonbinApiKeyEl) {
+    jsonbinApiKeyEl.addEventListener('input', (e) => {
+      jsonbinApiKey = e.target.value.trim();
+      localStorage.setItem('jsonbin_api_key', jsonbinApiKey);
+    });
+  }
+  if (jsonbinBinIdEl) {
+    jsonbinBinIdEl.addEventListener('input', (e) => {
+      jsonbinBinId = e.target.value.trim();
+      localStorage.setItem('jsonbin_bin_id', jsonbinBinId);
+    });
+  }
+  if ($('#btnJsonbinPush')) $('#btnJsonbinPush').addEventListener('click', pushToJsonBin);
+  if ($('#btnJsonbinPull')) $('#btnJsonbinPull').addEventListener('click', pullFromJsonBin);
   
   // Clear all
   $('#btnClearAll').addEventListener('click', async () => {
@@ -2489,6 +2694,9 @@ async function init() {
     openaiApiKey = savedKey;
     $('#openaiApiKey').value = savedKey;
   }
+  // JSONBin 云同步
+  if ($('#jsonbinApiKey')) $('#jsonbinApiKey').value = jsonbinApiKey;
+  if ($('#jsonbinBinId')) $('#jsonbinBinId').value = jsonbinBinId;
 }
 
 // Start the app
