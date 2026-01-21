@@ -1826,6 +1826,31 @@ async function confirmImportPaste() {
 // ===== JSONBin 云同步 =====
 const JSONBIN_BASE = 'https://api.jsonbin.io/v3/b';
 
+/** 用 XMLHttpRequest 请求 JSONBin，避免部分环境下 fetch 出现 TypeError: Type error */
+function jsonbinXhr(method, url, body, headers) {
+  return new Promise(function (resolve, reject) {
+    var xhr = new XMLHttpRequest();
+    xhr.open(method, url);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    for (var k in headers) if (headers.hasOwnProperty(k)) xhr.setRequestHeader(k, headers[k]);
+    xhr.onload = function () {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        var text = xhr.responseText || '';
+        if (!text.trim()) return resolve(null);
+        try { resolve(JSON.parse(text)); } catch (e) { reject(new Error('响应解析失败：' + (e && e.message ? e.message : ''))); }
+      } else {
+        var msg = '请求失败 (' + xhr.status + ')';
+        try { var o = JSON.parse(xhr.responseText || '{}'); if (o && o.message) msg = o.message; } catch (_) {}
+        reject(new Error(msg));
+      }
+    };
+    xhr.onerror = function () { reject(new Error('网络请求失败，请检查网络或关闭广告拦截')); };
+    xhr.ontimeout = function () { reject(new Error('请求超时')); };
+    xhr.timeout = 30000;
+    xhr.send(body == null ? null : body);
+  });
+}
+
 function updateJsonbinSyncStatus(text) {
   const el = $('#jsonbinSyncStatus');
   if (el) el.textContent = text;
@@ -1894,38 +1919,12 @@ async function pushToJsonBin() {
 
   try {
     if (binId) {
-      const res = await fetch(`${JSONBIN_BASE}/${binId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Master-Key': apiKey
-        },
-        body: bodyStr
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err && err.message ? err.message : `上传失败 (${res.status})`);
-      }
+      await jsonbinXhr('PUT', JSONBIN_BASE + '/' + binId, bodyStr, { 'X-Master-Key': apiKey });
     } else {
-      const res = await fetch(JSONBIN_BASE, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Master-Key': apiKey,
-          'X-Bin-Name': '甜饼工坊-共享数据'
-        },
-        body: bodyStr
+      const data = await jsonbinXhr('POST', JSONBIN_BASE, bodyStr, {
+        'X-Master-Key': apiKey,
+        'X-Bin-Name': '甜饼工坊-共享数据'
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err && err.message ? err.message : `创建失败 (${res.status})`);
-      }
-      let data;
-      try {
-        data = await res.json();
-      } catch (e) {
-        throw new Error('云端返回内容无法解析：' + (e && e.message ? e.message : ''));
-      }
       const id = (data && data.metadata && data.metadata.id) || (data && data.id) || null;
       if (id != null) {
         const sid = String(id);
@@ -1976,19 +1975,8 @@ async function pullFromJsonBin() {
   if ($('#btnJsonbinPull')) $('#btnJsonbinPull').disabled = true;
 
   try {
-    const res = await fetch(`${JSONBIN_BASE}/${binId}?meta=false`, {
-      method: 'GET',
-      headers: { 'X-Master-Key': apiKey.trim() }
-    });
-
-    if (!res.ok) {
-      if (res.status === 404) throw new Error('未找到该 Bin，请检查 Bin ID 是否正确');
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err?.message || `拉取失败 (${res.status})`);
-    }
-
-    const data = await res.json();
-    const cloudDays = Array.isArray(data?.days) ? data.days : [];
+    const data = await jsonbinXhr('GET', JSONBIN_BASE + '/' + binId + '?meta=false', null, { 'X-Master-Key': apiKey.trim() });
+    const cloudDays = Array.isArray(data && data.days) ? data.days : [];
 
     await mergeDaysFromCloud(cloudDays);
     await refresh();

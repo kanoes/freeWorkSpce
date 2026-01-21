@@ -34,6 +34,12 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   
+  // 直接放行 JSONBin：避免 SW 影响跨域 POST/PUT，防止部分环境出现 TypeError
+  if (request.url.indexOf('api.jsonbin.io') !== -1) {
+    event.respondWith(fetch(request));
+    return;
+  }
+  
   // Skip non-GET requests
   if (request.method !== 'GET') return;
   
