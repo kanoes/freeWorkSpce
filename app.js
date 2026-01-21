@@ -1923,7 +1923,7 @@ async function pushToJsonBin() {
     } else {
       const data = await jsonbinXhr('POST', JSONBIN_BASE, bodyStr, {
         'X-Master-Key': apiKey,
-        'X-Bin-Name': '甜饼工坊-共享数据'
+        'X-Bin-Name': 'CookieWorkshop-Sync'
       });
       const id = (data && data.metadata && data.metadata.id) || (data && data.id) || null;
       if (id != null) {
