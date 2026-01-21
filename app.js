@@ -1863,11 +1863,12 @@ async function mergeDaysFromCloud(cloudDays) {
 }
 
 async function pushToJsonBin() {
-  const apiKey = ($('#jsonbinApiKey') && $('#jsonbinApiKey').value) || jsonbinApiKey;
-  let binId = ($('#jsonbinBinId') && $('#jsonbinBinId').value) || jsonbinBinId;
-  binId = binId ? binId.trim() : '';
+  const apiKeyRaw = ($('#jsonbinApiKey') && $('#jsonbinApiKey').value) || jsonbinApiKey;
+  const apiKey = String(apiKeyRaw || '').trim();
+  const binIdRaw = ($('#jsonbinBinId') && $('#jsonbinBinId').value) || jsonbinBinId;
+  const binId = (typeof binIdRaw === 'string' ? binIdRaw : String(binIdRaw || '')).trim();
 
-  if (!apiKey || !apiKey.trim()) {
+  if (!apiKey) {
     alert('请先在下方填写 JSONBin API Key');
     return;
   }
@@ -1879,6 +1880,17 @@ async function pushToJsonBin() {
   if ($('#btnJsonbinPull')) $('#btnJsonbinPull').disabled = true;
 
   const payload = getExportData();
+  let bodyStr;
+  try {
+    bodyStr = JSON.stringify(payload);
+  } catch (e) {
+    isJsonbinSyncing = false;
+    if ($('#btnJsonbinPush')) $('#btnJsonbinPush').disabled = false;
+    if ($('#btnJsonbinPull')) $('#btnJsonbinPull').disabled = false;
+    updateJsonbinSyncStatus('');
+    alert('上传失败：数据无法序列化为 JSON。' + (e && e.message ? e.message : ''));
+    return;
+  }
 
   try {
     if (binId) {
@@ -1886,47 +1898,56 @@ async function pushToJsonBin() {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'X-Master-Key': apiKey.trim()
+          'X-Master-Key': apiKey
         },
-        body: JSON.stringify(payload)
+        body: bodyStr
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err?.message || `上传失败 (${res.status})`);
+        throw new Error(err && err.message ? err.message : `上传失败 (${res.status})`);
       }
     } else {
       const res = await fetch(JSONBIN_BASE, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Master-Key': apiKey.trim(),
+          'X-Master-Key': apiKey,
           'X-Bin-Name': '甜饼工坊-共享数据'
         },
-        body: JSON.stringify(payload)
+        body: bodyStr
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err?.message || `创建失败 (${res.status})`);
+        throw new Error(err && err.message ? err.message : `创建失败 (${res.status})`);
       }
-      const data = await res.json();
-      const id = data?.metadata?.id || data?.id;
-      if (id) {
-        jsonbinBinId = id;
-        localStorage.setItem('jsonbin_bin_id', id);
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        throw new Error('云端返回内容无法解析：' + (e && e.message ? e.message : ''));
+      }
+      const id = (data && data.metadata && data.metadata.id) || (data && data.id) || null;
+      if (id != null) {
+        const sid = String(id);
+        jsonbinBinId = sid;
+        localStorage.setItem('jsonbin_bin_id', sid);
         const input = $('#jsonbinBinId');
-        if (input) input.value = id;
+        if (input) input.value = sid;
       }
     }
 
-    jsonbinApiKey = apiKey.trim();
-    localStorage.setItem('jsonbin_api_key', jsonbinApiKey);
+    jsonbinApiKey = apiKey;
+    localStorage.setItem('jsonbin_api_key', apiKey);
     const at = new Date().toLocaleString('zh-CN');
     localStorage.setItem('jsonbin_last_sync', JSON.stringify({ at, dir: 'push' }));
     updateJsonbinSyncStatus(`上次同步：${at}（上传）`);
     alert('已上传到云端！对方可用相同 API Key 和 Bin ID「从云端拉取」。');
   } catch (e) {
     updateJsonbinSyncStatus('');
-    alert('上传失败：' + (e.message || e));
+    const msg = (e && e.message) ? e.message : String(e);
+    const name = (e && e.name) ? e.name : '';
+    const full = (name && name !== 'Error') ? name + ': ' + msg : msg;
+    alert('上传失败：' + full);
   } finally {
     isJsonbinSyncing = false;
     if ($('#btnJsonbinPush')) $('#btnJsonbinPush').disabled = false;
