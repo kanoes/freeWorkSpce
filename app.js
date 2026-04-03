@@ -152,6 +152,13 @@ function compareTradeOrder(a, b) {
   return String(a.id || '').localeCompare(String(b.id || ''));
 }
 
+function compareTradeProcessingOrder(a, b) {
+  const effectWeight = (trade) => trade.positionEffect === 'open' ? 0 : 1;
+  const effectDelta = effectWeight(a) - effectWeight(b);
+  if (effectDelta !== 0) return effectDelta;
+  return compareTradeOrder(a, b);
+}
+
 function getScopeLabel(scope) {
   if (scope === 'cash') return '现物';
   if (scope === 'margin') return '信用';
@@ -826,6 +833,32 @@ function buildTradeSoftKey(date, trade) {
   ].join('|');
 }
 
+function isCsvImportedTrade(trade) {
+  const source = trimText(trade?.source || '');
+  return source === 'csv' || Boolean(trimText(trade?.fingerprint || trade?.csvBaseSignature || ''));
+}
+
+function collectManualDaysForCsvRebuild(days) {
+  const manualDays = new Map();
+
+  days.map(normalizeDay).forEach((day) => {
+    const manualTrades = day.trades
+      .filter((trade) => !isCsvImportedTrade(trade) && trimText(trade.source) === 'manual')
+      .map((trade, index) => normalizeTrade({ ...trade, order: index }, day.date, index));
+
+    if (!manualTrades.length) return;
+
+    manualDays.set(day.date, {
+      id: day.id || generateId(),
+      date: day.date,
+      trades: reindexTrades(manualTrades, day.date),
+      updatedAt: day.updatedAt || new Date().toISOString()
+    });
+  });
+
+  return manualDays;
+}
+
 function getTradeIdentityKeys(date, trade) {
   const normalized = normalizeTrade(trade, date, Number(trade?.order) || 0);
   const keys = [];
@@ -1070,10 +1103,7 @@ async function importCsvFile(file) {
   }
 
   const now = new Date().toISOString();
-  const workingDays = new Map(DAYS.map((day) => {
-    const normalizedDay = normalizeDay(day);
-    return [normalizedDay.date, normalizedDay];
-  }));
+  const workingDays = collectManualDaysForCsvRebuild(DAYS);
 
   parsed.trades.forEach(({ date, trade }) => {
     const day = workingDays.get(date) || {
@@ -1309,9 +1339,11 @@ function buildAnalytics(days) {
 
   normalizedDays.forEach((day) => {
     const dayView = dayMap.get(day.date);
+    const processingTrades = day.trades
+      .map((trade, index) => normalizeTrade(trade, day.date, index))
+      .sort(compareTradeProcessingOrder);
 
-    day.trades.forEach((trade, index) => {
-      const normalizedTrade = normalizeTrade(trade, day.date, index);
+    processingTrades.forEach((normalizedTrade) => {
       const quantity = Number(normalizedTrade.quantity) || 0;
       const price = Number(normalizedTrade.price) || 0;
       const fee = Number(normalizedTrade.fee) || 0;
@@ -1977,7 +2009,7 @@ function updateCsvStatus() {
   $('#csvImportStatus').textContent = label;
   $('#csvSettingsHint').textContent = summary
     ? `最近一次共读取 ${summary.totalRows} 行，导入 ${summary.importedRows} 行，忽略投信 ${summary.skippedInvestmentTrust} 行。`
-    : '支持券商约定履历 CSV；只导入株式現物和信用数据。';
+    : '支持券商约定履历 CSV；只导入株式現物和信用数据，并会用最新 CSV 重建券商记录。';
 }
 
 function updateJsonbinSyncStatus(text) {
@@ -2665,7 +2697,7 @@ function bindEvents() {
     try {
       const summary = await importCsvFile(file);
       closeSettings();
-      alert(`CSV 导入完成：导入 ${summary.importedRows} 行，忽略投信 ${summary.skippedInvestmentTrust} 行。`);
+      alert(`CSV 导入完成：导入 ${summary.importedRows} 行，忽略投信 ${summary.skippedInvestmentTrust} 行。旧的 CSV 券商记录已用这份文件重建，手动录入会保留。`);
     } catch (error) {
       alert(`CSV 导入失败：${error.message || error}`);
     } finally {
