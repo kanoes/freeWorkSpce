@@ -462,20 +462,12 @@
           <span class="form-label">Firebase Web 配置</span>
           <textarea id="firebaseConfigInput" class="form-input" rows="8" placeholder='可以直接粘贴 firebaseConfig，例如：&#10;const firebaseConfig = {&#10;  apiKey: \"...\",&#10;  authDomain: \"...\",&#10;  projectId: \"...\",&#10;  appId: \"...\"&#10;};'></textarea>
         </label>
-        <label class="field-group">
-          <span class="form-label">登录邮箱</span>
-          <input type="email" id="firebaseAuthEmail" class="form-input" placeholder="you@example.com" />
-        </label>
-        <label class="field-group">
-          <span class="form-label">登录密码</span>
-          <input type="password" id="firebaseAuthPassword" class="form-input" placeholder="至少 6 位" />
-        </label>
         <div class="settings-actions">
           <button class="ghost-btn" type="button" id="btnSaveFirebaseConfig">保存配置</button>
-          <button class="ghost-btn" type="button" id="btnFirebaseSignUp">注册并登录</button>
-          <button class="ghost-btn" type="button" id="btnFirebaseSignIn">登录</button>
+          <button class="primary-btn" type="button" id="btnFirebaseGoogleSignIn">Google 登录</button>
           <button class="ghost-btn" type="button" id="btnFirebaseSignOut">退出</button>
         </div>
+        <p class="settings-note">电脑端会优先弹出 Google 登录窗口，手机端会自动跳转到 Google 授权页。</p>
         <div class="settings-actions">
           <button class="primary-btn" type="button" id="btnCloudPush">上传到云端</button>
           <button class="ghost-btn" type="button" id="btnCloudPull">从云端拉取</button>

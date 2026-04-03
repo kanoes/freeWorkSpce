@@ -26,7 +26,6 @@ const APP_VERSION = '4.0';
 const SETTINGS_KEY = 'trade_diary_settings_v4';
 const CLOUD_SYNC_META_KEY = 'trade_diary_cloud_last_sync_v1';
 const FIREBASE_CONFIG_KEY = 'trade_diary_firebase_config_v1';
-const FIREBASE_LAST_EMAIL_KEY = 'trade_diary_firebase_email_v1';
 const DIVIDEND_START_DATE = '2026-04-01';
 const SCOPES = ['all', 'cash', 'margin'];
 const MARGIN_INTEREST_RATE = 0.028;
@@ -1659,13 +1658,13 @@ let ratioEditTarget = '';
 let isCloudSyncing = false;
 
 let firebaseConfigText = localStorage.getItem(FIREBASE_CONFIG_KEY) || '';
-let firebaseLastEmail = localStorage.getItem(FIREBASE_LAST_EMAIL_KEY) || '';
 let firebaseApp = null;
 let firebaseAuth = null;
 let firebaseDb = null;
 let firebaseUser = null;
 let firebaseInitPromise = null;
 let firebaseAuthObserverAttached = false;
+let firebaseRedirectHandled = false;
 
 // ===== Charts =====
 function getScopeAccent(scope) {
@@ -2170,14 +2169,18 @@ function updateCloudAuthStatus(message = '') {
   } else if (!trimText(firebaseConfigText)) {
     statusEl.textContent = '还没有填写 Firebase Web 配置。';
   } else if (firebaseUser?.email) {
-    statusEl.textContent = `当前云账号：${maskEmail(firebaseUser.email)}`;
+    const accountLabel = trimText(firebaseUser.displayName)
+      ? `${trimText(firebaseUser.displayName)} · ${maskEmail(firebaseUser.email)}`
+      : maskEmail(firebaseUser.email);
+    statusEl.textContent = `当前云账号：${accountLabel}`;
   } else {
-    statusEl.textContent = 'Firebase 已连接，当前未登录。';
+    statusEl.textContent = 'Firebase 已连接，当前未登录 Google。';
   }
 
   const isSignedIn = Boolean(firebaseUser?.uid);
   if ($('#btnCloudPush')) $('#btnCloudPush').disabled = !isSignedIn || isCloudSyncing;
   if ($('#btnCloudPull')) $('#btnCloudPull').disabled = !isSignedIn || isCloudSyncing;
+  if ($('#btnFirebaseGoogleSignIn')) $('#btnFirebaseGoogleSignIn').disabled = isCloudSyncing;
   if ($('#btnFirebaseSignOut')) $('#btnFirebaseSignOut').disabled = !isSignedIn;
 }
 
@@ -2200,8 +2203,6 @@ function initCloudSyncStatus() {
 
 function fillSettingsForm() {
   if ($('#firebaseConfigInput')) $('#firebaseConfigInput').value = firebaseConfigText;
-  if ($('#firebaseAuthEmail')) $('#firebaseAuthEmail').value = firebaseLastEmail;
-  if ($('#firebaseAuthPassword')) $('#firebaseAuthPassword').value = '';
 }
 
 function setActiveTab(tab) {
@@ -2738,14 +2739,35 @@ function saveFirebaseConfigText(rawValue) {
   return { normalizedConfig, hasChanged };
 }
 
-function collectFirebaseCredentials() {
-  const email = trimText($('#firebaseAuthEmail')?.value || firebaseLastEmail);
-  const password = $('#firebaseAuthPassword')?.value || '';
-  if (!email) throw new Error('请先填写登录邮箱。');
-  if (!password) throw new Error('请先填写登录密码。');
-  firebaseLastEmail = email;
-  localStorage.setItem(FIREBASE_LAST_EMAIL_KEY, email);
-  return { email, password };
+function createGoogleProvider() {
+  const provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  return provider;
+}
+
+function shouldUseRedirectForGoogleSignIn() {
+  const userAgent = navigator.userAgent || '';
+  const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(userAgent);
+  const isStandalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone;
+  return isMobileDevice || isStandalone;
+}
+
+async function resolveFirebaseRedirectResult() {
+  if (firebaseRedirectHandled || !firebaseAuth) return;
+  firebaseRedirectHandled = true;
+
+  try {
+    const result = await firebaseAuth.getRedirectResult();
+    if (result?.user) {
+      firebaseUser = result.user;
+      updateCloudAuthStatus();
+      alert('已完成 Google 登录。');
+    }
+  } catch (error) {
+    console.warn('Firebase redirect sign-in failed:', error);
+    updateCloudAuthStatus(error.message || String(error));
+    alert(`Google 登录失败：${error.message || error}`);
+  }
 }
 
 async function ensureFirebaseReady() {
@@ -2770,6 +2792,7 @@ async function ensureFirebaseReady() {
 
     firebaseAuth = firebaseApp.auth();
     firebaseDb = firebaseApp.firestore();
+    firebaseAuth.languageCode = navigator.language || 'zh-CN';
 
     if (!firebaseAuthObserverAttached) {
       firebaseAuth.onAuthStateChanged((user) => {
@@ -2780,7 +2803,8 @@ async function ensureFirebaseReady() {
     }
 
     await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-    firebaseUser = firebaseAuth.currentUser || null;
+    await resolveFirebaseRedirectResult();
+    firebaseUser = firebaseAuth.currentUser || firebaseUser || null;
     updateCloudAuthStatus();
     return { app: firebaseApp, auth: firebaseAuth, db: firebaseDb };
   })().catch((error) => {
@@ -2900,33 +2924,35 @@ function mergeDays(localDays, cloudDays) {
   return Array.from(byDate.values()).sort(compareByDateAsc);
 }
 
-async function signUpWithFirebase() {
+async function signInWithGoogle() {
   try {
     saveFirebaseConfigText($('#firebaseConfigInput').value || firebaseConfigText);
     await ensureFirebaseReady();
-    const { email, password } = collectFirebaseCredentials();
-    await firebaseAuth.createUserWithEmailAndPassword(email, password);
-    $('#firebaseAuthPassword').value = '';
-    updateCloudAuthStatus();
-    alert('Firebase 云账号已创建并登录。现在可以在多设备上用同一邮箱密码同步。');
-  } catch (error) {
-    updateCloudAuthStatus(error.message || String(error));
-    alert(`注册失败：${error.message || error}`);
-  }
-}
+    const provider = createGoogleProvider();
 
-async function signInWithFirebase() {
-  try {
-    saveFirebaseConfigText($('#firebaseConfigInput').value || firebaseConfigText);
-    await ensureFirebaseReady();
-    const { email, password } = collectFirebaseCredentials();
-    await firebaseAuth.signInWithEmailAndPassword(email, password);
-    $('#firebaseAuthPassword').value = '';
+    if (shouldUseRedirectForGoogleSignIn()) {
+      await firebaseAuth.signInWithRedirect(provider);
+      return;
+    }
+
+    const result = await firebaseAuth.signInWithPopup(provider);
+    firebaseUser = result.user || firebaseAuth.currentUser || null;
     updateCloudAuthStatus();
     alert('已登录 Firebase 云账号。');
   } catch (error) {
+    if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(error?.code || '')) {
+      try {
+        await firebaseAuth.signInWithRedirect(createGoogleProvider());
+        return;
+      } catch (redirectError) {
+        updateCloudAuthStatus(redirectError.message || String(redirectError));
+        alert(`Google 登录失败：${redirectError.message || redirectError}`);
+        return;
+      }
+    }
+
     updateCloudAuthStatus(error.message || String(error));
-    alert(`登录失败：${error.message || error}`);
+    alert(`Google 登录失败：${error.message || error}`);
   }
 }
 
@@ -2954,7 +2980,7 @@ async function saveFirebaseConfigFromSettings() {
     }
 
     await ensureFirebaseReady();
-    updateCloudAuthStatus(firebaseUser?.uid ? `当前云账号：${maskEmail(firebaseUser.email || '')}` : 'Firebase 配置已保存，可以继续登录。');
+    updateCloudAuthStatus(firebaseUser?.uid ? `当前云账号：${maskEmail(firebaseUser.email || '')}` : 'Firebase 配置已保存，可以继续使用 Google 登录。');
     alert('Firebase 配置已保存。');
   } catch (error) {
     updateCloudAuthStatus(error.message || String(error));
@@ -3216,13 +3242,8 @@ function bindEvents() {
   $('#btnCancelRatioEdit').addEventListener('click', closeRatioEditor);
   $('#btnSaveRatioEdit').addEventListener('click', saveRatioEditor);
 
-  $('#firebaseAuthEmail').addEventListener('input', (event) => {
-    firebaseLastEmail = trimText(event.target.value);
-    localStorage.setItem(FIREBASE_LAST_EMAIL_KEY, firebaseLastEmail);
-  });
   $('#btnSaveFirebaseConfig').addEventListener('click', saveFirebaseConfigFromSettings);
-  $('#btnFirebaseSignUp').addEventListener('click', signUpWithFirebase);
-  $('#btnFirebaseSignIn').addEventListener('click', signInWithFirebase);
+  $('#btnFirebaseGoogleSignIn').addEventListener('click', signInWithGoogle);
   $('#btnFirebaseSignOut').addEventListener('click', signOutFromFirebase);
   $('#btnCloudPush').addEventListener('click', pushToCloud);
   $('#btnCloudPull').addEventListener('click', pullFromCloud);
@@ -3233,6 +3254,7 @@ function bindEvents() {
     SETTINGS = createDefaultSettings();
     persistSettings();
     localStorage.removeItem(CLOUD_SYNC_META_KEY);
+    localStorage.removeItem('trade_diary_firebase_email_v1');
     localStorage.removeItem('jsonbin_last_sync');
     localStorage.removeItem('jsonbin_api_key');
     localStorage.removeItem('jsonbin_bin_id');
