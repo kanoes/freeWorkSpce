@@ -1115,6 +1115,44 @@ textarea:focus {
   margin-top: 6px;
 }
 
+.confirm-body {
+  display: grid;
+  gap: 12px;
+}
+
+.confirm-step {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(201, 138, 84, 0.24);
+  background: rgba(255, 245, 230, 0.92);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.confirm-warning {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 244, 238, 0.96);
+  border: 1px solid rgba(207, 92, 92, 0.14);
+  color: var(--text);
+  line-height: 1.7;
+  font-size: 13px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.confirm-actions.swap {
+  flex-direction: row-reverse;
+}
+
 .sheet-actions-spacer {
   flex: 1;
 }

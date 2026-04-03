@@ -1655,6 +1655,7 @@ let editingMode = 'add';
 let editingDay = null;
 let editingTrades = [];
 let ratioEditTarget = '';
+let cloudClearConfirmStep = 0;
 let isCloudSyncing = false;
 
 let firebaseConfigText = localStorage.getItem(FIREBASE_CONFIG_KEY) || '';
@@ -2183,6 +2184,7 @@ function updateCloudAuthStatus(message = '') {
   if ($('#btnCloudPull')) $('#btnCloudPull').disabled = !isSignedIn || isCloudSyncing;
   if ($('#btnFirebaseGoogleSignIn')) $('#btnFirebaseGoogleSignIn').disabled = isCloudSyncing;
   if ($('#btnFirebaseSignOut')) $('#btnFirebaseSignOut').disabled = !isSignedIn;
+  if ($('#btnClearAll')) $('#btnClearAll').disabled = !isSignedIn || isCloudSyncing;
 }
 
 function initCloudSyncStatus() {
@@ -2194,7 +2196,7 @@ function initCloudSyncStatus() {
     }
 
     const data = JSON.parse(raw);
-    const direction = data.dir === 'push' ? '上传' : '拉取';
+    const direction = data.dir === 'push' ? '上传' : data.dir === 'clear' ? '清除' : '拉取';
     const provider = data.provider ? ` · ${data.provider}` : '';
     updateCloudSyncStatus(`最近同步：${data.at}（${direction}${provider}）`);
   } catch {
@@ -2701,6 +2703,87 @@ function saveRatioEditor() {
   persistSettings();
   closeRatioEditor();
   renderDividendPage();
+}
+
+function renderCloudClearConfirmStep() {
+  const isSecondStep = cloudClearConfirmStep === 2;
+  $('#cloudClearTitle').textContent = isSecondStep ? '确认清除云端数据？' : '确认清除本地数据？';
+  $('#cloudClearDesc').textContent = isSecondStep
+    ? '该操作另会清除云端所有数据，你确定要进行吗？'
+    : '该操作会清除本地所有数据，你确定要进行吗？';
+  $('#cloudClearStep').textContent = isSecondStep ? '第 2 次确认' : '第 1 次确认';
+  $('#cloudClearWarning').textContent = isSecondStep
+    ? '第二次确认通过后，会把云端交易数据和云端设置数据一起清掉。'
+    : '第一次确认通过后，还会再确认一次云端数据清除。只有连续两次都选择“是”，才会真的执行。';
+  $('#btnCloudClearYes').textContent = isSecondStep ? '是，立即清除' : '是，继续';
+  $('#btnCloudClearNo').textContent = '否，取消';
+  $('#cloudClearActions').classList.toggle('swap', isSecondStep);
+}
+
+function openCloudClearConfirm() {
+  if (isCloudSyncing) return;
+  if (!firebaseUser?.uid) {
+    alert('请先登录 Firebase 云账号，再清除云端交易数据。');
+    return;
+  }
+
+  cloudClearConfirmStep = 1;
+  renderCloudClearConfirmStep();
+  $('#cloudClearSheet').setAttribute('aria-hidden', 'false');
+}
+
+function closeCloudClearConfirm() {
+  cloudClearConfirmStep = 0;
+  $('#cloudClearSheet').setAttribute('aria-hidden', 'true');
+}
+
+async function clearCloudTradeData() {
+  if (isCloudSyncing) return;
+
+  try {
+    saveFirebaseConfigText($('#firebaseConfigInput').value || firebaseConfigText);
+    await ensureFirebaseReady();
+    closeCloudClearConfirm();
+    isCloudSyncing = true;
+    updateCloudAuthStatus();
+    updateCloudSyncStatus('正在清除本地和云端数据…');
+
+    const rootRef = getCloudRootRef();
+    const daysSnapshot = await rootRef.collection('days').get();
+    const settingsRef = rootRef.collection('meta').doc('settings');
+    const queue = createFirestoreBatchQueue(firebaseDb);
+    daysSnapshot.forEach((doc) => queue.delete(doc.ref));
+    queue.delete(settingsRef);
+    await queue.commitAll();
+
+    await clearAllDays();
+    SETTINGS = createDefaultSettings();
+    persistSettings();
+    await refresh();
+
+    const at = new Date().toLocaleString('zh-CN');
+    localStorage.setItem(CLOUD_SYNC_META_KEY, JSON.stringify({ at, dir: 'clear', provider: 'Firebase' }));
+    initCloudSyncStatus();
+    alert('本地和云端的交易数据都已清除，分红比例等本地设置也已恢复默认值。');
+  } catch (error) {
+    updateCloudSyncStatus('数据清除失败');
+    alert(`清除失败：${error.message || error}`);
+  } finally {
+    isCloudSyncing = false;
+    updateCloudAuthStatus();
+  }
+}
+
+async function handleCloudClearConfirmYes() {
+  if (cloudClearConfirmStep === 1) {
+    cloudClearConfirmStep = 2;
+    renderCloudClearConfirmStep();
+    return;
+  }
+
+  if (cloudClearConfirmStep === 2) {
+    await clearCloudTradeData();
+  }
 }
 
 // ===== Settings Sheet =====
@@ -3253,24 +3336,18 @@ function bindEvents() {
   $('#btnCancelRatioEdit').addEventListener('click', closeRatioEditor);
   $('#btnSaveRatioEdit').addEventListener('click', saveRatioEditor);
 
+  $('#btnCloseCloudClearSheet').addEventListener('click', closeCloudClearConfirm);
+  $('#cloudClearBackdrop').addEventListener('click', closeCloudClearConfirm);
+  $('#btnCloudClearNo').addEventListener('click', closeCloudClearConfirm);
+  $('#btnCloudClearYes').addEventListener('click', handleCloudClearConfirmYes);
+
   $('#btnSaveFirebaseConfig').addEventListener('click', saveFirebaseConfigFromSettings);
   $('#btnFirebaseGoogleSignIn').addEventListener('click', signInWithGoogle);
   $('#btnFirebaseSignOut').addEventListener('click', signOutFromFirebase);
   $('#btnCloudPush').addEventListener('click', pushToCloud);
   $('#btnCloudPull').addEventListener('click', pullFromCloud);
 
-  $('#btnClearAll').addEventListener('click', async () => {
-    if (!confirm('确定要清空所有本地交易数据吗？这一步不可撤销。')) return;
-    await clearAllDays();
-    SETTINGS = createDefaultSettings();
-    persistSettings();
-    localStorage.removeItem(CLOUD_SYNC_META_KEY);
-    localStorage.removeItem('trade_diary_firebase_email_v1');
-    localStorage.removeItem('jsonbin_last_sync');
-    localStorage.removeItem('jsonbin_api_key');
-    localStorage.removeItem('jsonbin_bin_id');
-    await refresh();
-  });
+  $('#btnClearAll').addEventListener('click', openCloudClearConfirm);
 }
 
 // ===== Initialize =====
