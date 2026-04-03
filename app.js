@@ -2,8 +2,19 @@
 // 聚焦 CSV 上传、云同步、现物/信用分开统计、分红快照规则
 
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  window.addEventListener('load', async () => {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+      if ('caches' in window) {
+        const cacheNames = await caches.keys();
+        await Promise.all(
+          cacheNames
+            .filter((name) => name.startsWith('cookie-workshop-'))
+            .map((name) => caches.delete(name))
+        );
+      }
+    } catch {}
   });
 }
 
@@ -260,9 +271,11 @@ function getStockDisplayName(symbol, fallbackName = '') {
 }
 
 // ===== IndexedDB =====
-const DB_NAME = 'tradediary_db';
-const DB_VERSION = 4;
+const DB_NAME = 'tradediary_db_local_v41';
+const LEGACY_DB_NAMES = ['tradediary_db'];
+const DB_VERSION = 1;
 const STORE_NAME = 'days';
+let legacyMigrationPromise = null;
 
 function attachDbUpgradeHandler(request) {
   request.onupgradeneeded = (event) => {
@@ -281,40 +294,97 @@ function attachDbUpgradeHandler(request) {
   };
 }
 
-function openDBWithVersion(version) {
+function openNamedDB(dbName, version, needsUpgradeHandler = false) {
   return new Promise((resolve, reject) => {
-    const request = version ? indexedDB.open(DB_NAME, version) : indexedDB.open(DB_NAME);
-    attachDbUpgradeHandler(request);
+    const request = typeof version === 'number'
+      ? indexedDB.open(dbName, version)
+      : indexedDB.open(dbName);
+    if (needsUpgradeHandler) attachDbUpgradeHandler(request);
 
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
 
-async function getExistingDbVersion() {
-  if (typeof indexedDB.databases !== 'function') return null;
-
-  try {
-    const databases = await indexedDB.databases();
-    const matched = databases.find((item) => item.name === DB_NAME);
-    return Number.isFinite(matched?.version) ? matched.version : null;
-  } catch {
-    return null;
-  }
+async function openDB() {
+  return openNamedDB(DB_NAME, DB_VERSION, true);
 }
 
-async function openDB() {
-  const existingVersion = await getExistingDbVersion();
-  const targetVersion = existingVersion ? Math.max(DB_VERSION, existingVersion) : DB_VERSION;
-
-  try {
-    return await openDBWithVersion(targetVersion);
-  } catch (error) {
-    if (error?.name === 'VersionError') {
-      return openDBWithVersion();
+function readAllDaysFromDb(db) {
+  return new Promise((resolve, reject) => {
+    if (!db.objectStoreNames.contains(STORE_NAME)) {
+      resolve([]);
+      return;
     }
-    throw error;
-  }
+
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const rows = [];
+
+    let request;
+    if (store.indexNames.contains('date')) {
+      request = store.index('date').openCursor(null, 'prev');
+    } else {
+      request = store.openCursor();
+    }
+
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (cursor) {
+        rows.push(cursor.value);
+        cursor.continue();
+      } else {
+        resolve(rows);
+      }
+    };
+
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function countDaysInDb(db) {
+  return new Promise((resolve, reject) => {
+    if (!db.objectStoreNames.contains(STORE_NAME)) {
+      resolve(0);
+      return;
+    }
+
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const request = tx.objectStore(STORE_NAME).count();
+    request.onsuccess = () => resolve(Number(request.result) || 0);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function migrateLegacyDatabaseIfNeeded() {
+  if (legacyMigrationPromise) return legacyMigrationPromise;
+
+  legacyMigrationPromise = (async () => {
+    try {
+      const currentDb = await openDB();
+      const currentCount = await countDaysInDb(currentDb);
+      currentDb.close();
+      if (currentCount > 0) return;
+    } catch {}
+
+    for (const legacyName of LEGACY_DB_NAMES) {
+      try {
+        const legacyDb = await openNamedDB(legacyName);
+        const legacyRows = await readAllDaysFromDb(legacyDb);
+        legacyDb.close();
+
+        if (!legacyRows.length) continue;
+
+        const normalizedRows = legacyRows.map(normalizeDay).sort(compareByDateAsc);
+        await replaceAllDays(normalizedRows);
+        return;
+      } catch (error) {
+        console.warn('Legacy DB migration skipped:', legacyName, error);
+      }
+    }
+  })();
+
+  return legacyMigrationPromise;
 }
 
 async function getAllDays() {
@@ -2547,6 +2617,7 @@ function bindEvents() {
 
 // ===== Initialize =====
 async function init() {
+  await migrateLegacyDatabaseIfNeeded();
   await loadCompanyData();
   createMainChart();
   bindEvents();
