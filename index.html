@@ -480,10 +480,17 @@
 
       <section class="settings-section danger-zone">
         <h3>危险操作</h3>
-        <button class="settings-item danger" id="btnClearAll" type="button">
+        <button class="settings-item danger" id="btnClearLocal" type="button">
           <div>
-            <strong>清除本地与云端所有数据</strong>
-            <p>会清除当前设备与 Firebase 云端中的全部交易数据。</p>
+            <strong>清除本地数据</strong>
+            <p>清除当前设备上的交易记录和本地设置，不影响 Firebase 云端数据。</p>
+          </div>
+          <span>›</span>
+        </button>
+        <button class="settings-item danger" id="btnClearCloud" type="button">
+          <div>
+            <strong>清除云端数据</strong>
+            <p>清除 Firebase 云端中的交易记录和云端设置，不影响当前设备上的本地数据。</p>
           </div>
           <span>›</span>
         </button>
@@ -565,19 +572,19 @@
       <div class="sheet-header">
         <div>
           <div class="section-kicker">危险操作</div>
-          <h2 id="cloudClearTitle">确认清除所有数据？</h2>
-          <p id="cloudClearDesc">该操作会清除本地所有数据，你确定要进行吗？</p>
+          <h2 id="cloudClearTitle">确认清除本地数据？</h2>
+          <p id="cloudClearDesc">该操作会清除当前设备上的全部交易数据，你确定要进行吗？</p>
         </div>
         <button class="icon-btn small" id="btnCloseCloudClearSheet" aria-label="关闭">✕</button>
       </div>
 
       <div class="confirm-body">
-        <div class="confirm-step" id="cloudClearStep">第 1 次确认</div>
-        <div class="confirm-warning" id="cloudClearWarning">第一次确认只是在提醒你：本机数据会一并被清除。</div>
+        <div class="confirm-step" id="cloudClearStep">本地数据</div>
+        <div class="confirm-warning" id="cloudClearWarning">会删除当前设备上的交易和本地设置；Firebase 云端数据不会受影响。</div>
       </div>
 
       <div class="confirm-actions" id="cloudClearActions">
-        <button type="button" class="primary-btn" id="btnCloudClearYes">是，继续</button>
+        <button type="button" class="primary-btn" id="btnCloudClearYes">是，立即清除</button>
         <button type="button" class="ghost-btn" id="btnCloudClearNo">否，取消</button>
       </div>
     </div>

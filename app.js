@@ -1655,7 +1655,7 @@ let editingMode = 'add';
 let editingDay = null;
 let editingTrades = [];
 let ratioEditTarget = '';
-let cloudClearConfirmStep = 0;
+let cloudClearConfirmMode = '';
 let isCloudSyncing = false;
 
 let firebaseConfigText = localStorage.getItem(FIREBASE_CONFIG_KEY) || '';
@@ -2184,7 +2184,8 @@ function updateCloudAuthStatus(message = '') {
   if ($('#btnCloudPull')) $('#btnCloudPull').disabled = !isSignedIn || isCloudSyncing;
   if ($('#btnFirebaseGoogleSignIn')) $('#btnFirebaseGoogleSignIn').disabled = isCloudSyncing;
   if ($('#btnFirebaseSignOut')) $('#btnFirebaseSignOut').disabled = !isSignedIn;
-  if ($('#btnClearAll')) $('#btnClearAll').disabled = !isSignedIn || isCloudSyncing;
+  if ($('#btnClearLocal')) $('#btnClearLocal').disabled = isCloudSyncing;
+  if ($('#btnClearCloud')) $('#btnClearCloud').disabled = !isSignedIn || isCloudSyncing;
 }
 
 function initCloudSyncStatus() {
@@ -2707,34 +2708,34 @@ function saveRatioEditor() {
 }
 
 function renderCloudClearConfirmStep() {
-  const isSecondStep = cloudClearConfirmStep === 2;
-  $('#cloudClearTitle').textContent = isSecondStep ? '确认清除云端数据？' : '确认清除本地数据？';
-  $('#cloudClearDesc').textContent = isSecondStep
-    ? '该操作另会清除云端所有数据，你确定要进行吗？'
-    : '该操作会清除本地所有数据，你确定要进行吗？';
-  $('#cloudClearStep').textContent = isSecondStep ? '第 2 次确认' : '第 1 次确认';
-  $('#cloudClearWarning').textContent = isSecondStep
-    ? '第二次确认通过后，会把云端交易数据和云端设置数据一起清掉。'
-    : '第一次确认通过后，还会再确认一次云端数据清除。只有连续两次都选择“是”，才会真的执行。';
-  $('#btnCloudClearYes').textContent = isSecondStep ? '是，立即清除' : '是，继续';
+  const isCloudMode = cloudClearConfirmMode === 'cloud';
+  $('#cloudClearTitle').textContent = isCloudMode ? '确认清除云端数据？' : '确认清除本地数据？';
+  $('#cloudClearDesc').textContent = isCloudMode
+    ? '该操作会清除 Firebase 云端中的所有交易数据，你确定要进行吗？'
+    : '该操作会清除当前设备上的所有交易数据，你确定要进行吗？';
+  $('#cloudClearStep').textContent = isCloudMode ? '云端数据' : '本地数据';
+  $('#cloudClearWarning').textContent = isCloudMode
+    ? '会删除 Firebase 云端中的交易和云端设置；当前设备上的本地数据不会受影响。'
+    : '会删除当前设备上的交易和本地设置；Firebase 云端数据不会受影响。';
+  $('#btnCloudClearYes').textContent = '是，立即清除';
   $('#btnCloudClearNo').textContent = '否，取消';
-  $('#cloudClearActions').classList.toggle('swap', isSecondStep);
+  $('#cloudClearActions').classList.remove('swap');
 }
 
-function openCloudClearConfirm() {
+function openCloudClearConfirm(mode) {
   if (isCloudSyncing) return;
-  if (!firebaseUser?.uid) {
+  if (mode === 'cloud' && !firebaseUser?.uid) {
     alert('请先登录 Firebase 云账号，再清除云端交易数据。');
     return;
   }
 
-  cloudClearConfirmStep = 1;
+  cloudClearConfirmMode = mode === 'cloud' ? 'cloud' : 'local';
   renderCloudClearConfirmStep();
   $('#cloudClearSheet').setAttribute('aria-hidden', 'false');
 }
 
 function closeCloudClearConfirm() {
-  cloudClearConfirmStep = 0;
+  cloudClearConfirmMode = '';
   $('#cloudClearSheet').setAttribute('aria-hidden', 'true');
 }
 
@@ -2747,7 +2748,7 @@ async function clearCloudTradeData() {
     closeCloudClearConfirm();
     isCloudSyncing = true;
     updateCloudAuthStatus();
-    updateCloudSyncStatus('正在清除本地和云端数据…');
+    updateCloudSyncStatus('正在清除云端数据…');
 
     const rootRef = getCloudRootRef();
     const daysSnapshot = await rootRef.collection('days').get();
@@ -2757,17 +2758,37 @@ async function clearCloudTradeData() {
     queue.delete(settingsRef);
     await queue.commitAll();
 
-    await clearAllDays();
-    SETTINGS = createDefaultSettings();
-    persistSettings();
-    await refresh();
-
     const at = new Date().toLocaleString('zh-CN');
     localStorage.setItem(CLOUD_SYNC_META_KEY, JSON.stringify({ at, dir: 'clear', provider: 'Firebase' }));
     initCloudSyncStatus();
-    alert('本地和云端的交易数据都已清除，分红比例等本地设置也已恢复默认值。');
+    alert('Firebase 云端中的交易数据和云端设置已清除，本地数据未受影响。');
   } catch (error) {
-    updateCloudSyncStatus('数据清除失败');
+    updateCloudSyncStatus('云端数据清除失败');
+    alert(`清除失败：${error.message || error}`);
+  } finally {
+    isCloudSyncing = false;
+    updateCloudAuthStatus();
+  }
+}
+
+async function clearLocalTradeData() {
+  if (isCloudSyncing) return;
+
+  try {
+    closeCloudClearConfirm();
+    isCloudSyncing = true;
+    updateCloudAuthStatus();
+    updateCloudSyncStatus('正在清除本地数据…');
+
+    await clearAllDays();
+    SETTINGS = createDefaultSettings();
+    persistSettings();
+    localStorage.removeItem(CLOUD_SYNC_META_KEY);
+    await refresh();
+
+    alert('当前设备上的交易数据和本地设置已清除，Firebase 云端数据未受影响。');
+  } catch (error) {
+    updateCloudSyncStatus('本地数据清除失败');
     alert(`清除失败：${error.message || error}`);
   } finally {
     isCloudSyncing = false;
@@ -2776,14 +2797,13 @@ async function clearCloudTradeData() {
 }
 
 async function handleCloudClearConfirmYes() {
-  if (cloudClearConfirmStep === 1) {
-    cloudClearConfirmStep = 2;
-    renderCloudClearConfirmStep();
+  if (cloudClearConfirmMode === 'cloud') {
+    await clearCloudTradeData();
     return;
   }
 
-  if (cloudClearConfirmStep === 2) {
-    await clearCloudTradeData();
+  if (cloudClearConfirmMode === 'local') {
+    await clearLocalTradeData();
   }
 }
 
@@ -3347,7 +3367,8 @@ function bindEvents() {
   $('#btnCloudPush').addEventListener('click', pushToCloud);
   $('#btnCloudPull').addEventListener('click', pullFromCloud);
 
-  $('#btnClearAll').addEventListener('click', openCloudClearConfirm);
+  $('#btnClearLocal').addEventListener('click', () => openCloudClearConfirm('local'));
+  $('#btnClearCloud').addEventListener('click', () => openCloudClearConfirm('cloud'));
 }
 
 // ===== Initialize =====
