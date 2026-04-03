@@ -24,11 +24,14 @@ const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 const APP_VERSION = '4.0';
 const SETTINGS_KEY = 'trade_diary_settings_v4';
-const JSONBIN_BASE = 'https://api.jsonbin.io/v3/b';
+const CLOUD_SYNC_META_KEY = 'trade_diary_cloud_last_sync_v1';
+const FIREBASE_CONFIG_KEY = 'trade_diary_firebase_config_v1';
+const FIREBASE_LAST_EMAIL_KEY = 'trade_diary_firebase_email_v1';
 const DIVIDEND_START_DATE = '2026-04-01';
 const SCOPES = ['all', 'cash', 'margin'];
 const MARGIN_INTEREST_RATE = 0.028;
 const DAYS_IN_YEAR = 365;
+const RECORDS_PAGE_SIZE = 6;
 
 const generateId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 const deepClone = (value) => {
@@ -125,12 +128,66 @@ function formatPercent(value) {
   return `${Number(value || 0).toFixed(0)}%`;
 }
 
+function maskEmail(email) {
+  const value = trimText(email);
+  const [name, domain] = value.split('@');
+  if (!name || !domain) return value;
+  if (name.length <= 2) return `${name[0] || '*'}***@${domain}`;
+  return `${name.slice(0, 2)}***@${domain}`;
+}
+
 function safeNumber(value) {
   if (value === '' || value == null) return null;
   const normalized = trimText(value).replace(/,/g, '');
   if (!normalized || normalized === '--') return null;
   const result = Number(normalized);
   return Number.isFinite(result) ? result : null;
+}
+
+function parseFirebaseConfigInput(rawValue) {
+  let text = trimText(rawValue);
+  if (!text) {
+    throw new Error('请先粘贴 Firebase Web 配置。');
+  }
+
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    text = text.slice(firstBrace, lastBrace + 1);
+  }
+
+  const normalizedJson = text
+    .replace(/([{,]\s*)([A-Za-z0-9_]+)\s*:/g, '$1"$2":')
+    .replace(/'/g, '"')
+    .replace(/,\s*([}\]])/g, '$1');
+
+  let parsed;
+  try {
+    parsed = JSON.parse(normalizedJson);
+  } catch (error) {
+    throw new Error(`Firebase 配置解析失败：${error.message || error}`);
+  }
+
+  const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'appId'];
+  const missingKeys = requiredKeys.filter((key) => !trimText(parsed[key]));
+  if (missingKeys.length) {
+    throw new Error(`Firebase 配置缺少这些字段：${missingKeys.join('、')}`);
+  }
+
+  return parsed;
+}
+
+function normalizeFirebaseConfig(config) {
+  const parsed = parseFirebaseConfigInput(JSON.stringify(config || {}));
+  return {
+    apiKey: parsed.apiKey,
+    authDomain: parsed.authDomain,
+    projectId: parsed.projectId,
+    storageBucket: parsed.storageBucket || '',
+    messagingSenderId: parsed.messagingSenderId || '',
+    appId: parsed.appId,
+    measurementId: parsed.measurementId || ''
+  };
 }
 
 function isTradeComplete(trade) {
@@ -1589,6 +1646,8 @@ let dashboardScope = 'all';
 let analysisScope = 'all';
 let dividendScope = 'all';
 let currentMonthFilter = 'all';
+let activeTab = 'home';
+let recordsPage = 0;
 let chartRange = 'week';
 let chartType = 'cumulative';
 let profitChart = null;
@@ -1597,20 +1656,26 @@ let editingMode = 'add';
 let editingDay = null;
 let editingTrades = [];
 let ratioEditTarget = '';
-let isJsonbinSyncing = false;
+let isCloudSyncing = false;
 
-let jsonbinApiKey = localStorage.getItem('jsonbin_api_key') || '';
-let jsonbinBinId = localStorage.getItem('jsonbin_bin_id') || '';
+let firebaseConfigText = localStorage.getItem(FIREBASE_CONFIG_KEY) || '';
+let firebaseLastEmail = localStorage.getItem(FIREBASE_LAST_EMAIL_KEY) || '';
+let firebaseApp = null;
+let firebaseAuth = null;
+let firebaseDb = null;
+let firebaseUser = null;
+let firebaseInitPromise = null;
+let firebaseAuthObserverAttached = false;
 
 // ===== Charts =====
 function getScopeAccent(scope) {
   if (scope === 'cash') {
-    return { line: '#5ca9ff', fill: 'rgba(92, 169, 255, 0.16)' };
+    return { line: '#5f87d5', fill: 'rgba(95, 135, 213, 0.14)' };
   }
   if (scope === 'margin') {
-    return { line: '#ff9f4d', fill: 'rgba(255, 159, 77, 0.18)' };
+    return { line: '#d98758', fill: 'rgba(217, 135, 88, 0.16)' };
   }
-  return { line: '#4ecdc4', fill: 'rgba(78, 205, 196, 0.16)' };
+  return { line: '#b07a50', fill: 'rgba(176, 122, 80, 0.14)' };
 }
 
 function createMainChart() {
@@ -1648,12 +1713,12 @@ function createMainChart() {
       scales: {
         x: {
           grid: { display: false },
-          ticks: { color: 'rgba(236,245,255,0.65)', maxRotation: 0 }
+          ticks: { color: 'rgba(70, 48, 32, 0.56)', maxRotation: 0 }
         },
         y: {
-          grid: { color: 'rgba(236,245,255,0.08)' },
+          grid: { color: 'rgba(92, 66, 48, 0.08)' },
           ticks: {
-            color: 'rgba(236,245,255,0.65)',
+            color: 'rgba(70, 48, 32, 0.56)',
             callback: (value) => `¥${value}`
           }
         }
@@ -1711,7 +1776,7 @@ function updateMonthlyChart() {
   const summary = ANALYTICS.summaries[analysisScope];
   const labels = summary.monthly.map((item) => item.month.replace('-', '/'));
   const data = summary.monthly.map((item) => item.profit);
-  const colors = data.map((value) => value >= 0 ? '#34d399' : '#fb7185');
+  const colors = data.map((value) => value >= 0 ? '#148164' : '#cf5c5c');
 
   if (monthlyChart) {
     monthlyChart.destroy();
@@ -1743,12 +1808,12 @@ function updateMonthlyChart() {
       scales: {
         x: {
           grid: { display: false },
-          ticks: { color: 'rgba(236,245,255,0.65)' }
+          ticks: { color: 'rgba(70, 48, 32, 0.56)' }
         },
         y: {
-          grid: { color: 'rgba(236,245,255,0.08)' },
+          grid: { color: 'rgba(92, 66, 48, 0.08)' },
           ticks: {
-            color: 'rgba(236,245,255,0.65)',
+            color: 'rgba(70, 48, 32, 0.56)',
             callback: (value) => `¥${value}`
           }
         }
@@ -1801,7 +1866,8 @@ function getFilteredRecordDays() {
 
 function renderDashboardSummary() {
   const summary = ANALYTICS.summaries[dashboardScope];
-  $('#dashboardScopeCaption').textContent = `当前查看${getScopeLabel(dashboardScope)}数据`;
+  if ($('#dashboardScopeCaption')) $('#dashboardScopeCaption').textContent = `当前查看${getScopeLabel(dashboardScope)}数据`;
+  if ($('#dashboardScopeCaptionRecords')) $('#dashboardScopeCaptionRecords').textContent = `当前查看${getScopeLabel(dashboardScope)}数据`;
   $('#summaryProfit').textContent = formatMoney(summary.totalProfit, { signed: false });
   $('#summaryProfit').className = `summary-value ${summary.totalProfit > 0 ? 'positive' : summary.totalProfit < 0 ? 'negative' : 'neutral'}`;
   $('#summaryTradeDays').textContent = summary.activeDays;
@@ -1813,14 +1879,88 @@ function renderDashboardSummary() {
   updateScopeButtons('dashboard', dashboardScope);
 }
 
+function renderHomeOverview() {
+  const summary = ANALYTICS.summaries[dashboardScope];
+  const latestDay = ANALYTICS.daysDesc.find((day) => day.scopes[dashboardScope].tradeCount > 0);
+  const currentMonthKey = todayStr().slice(0, 7);
+  const currentMonthProfit = summary.monthly.find((item) => item.month === currentMonthKey)?.profit || 0;
+  const latestLabel = latestDay ? formatDateParts(latestDay.date).fullLabel : '暂无记录';
+  const latestMeta = latestDay
+    ? `${latestDay.scopes[dashboardScope].tradeCount} 笔交易 · ${formatMoney(latestDay.scopes[dashboardScope].profit)}`
+    : '录入后会在这里显示最近活动';
+
+  if ($('#homeDateChip')) $('#homeDateChip').textContent = formatDateParts(todayStr()).fullLabel;
+  if ($('#homeLatestTradeDate')) $('#homeLatestTradeDate').textContent = latestLabel;
+  if ($('#homeLatestTradeMeta')) $('#homeLatestTradeMeta').textContent = latestMeta;
+
+  if ($('#homeCurrentMonthProfit')) {
+    $('#homeCurrentMonthProfit').textContent = formatMoney(currentMonthProfit, { signed: false });
+    $('#homeCurrentMonthProfit').className = `overview-value ${currentMonthProfit > 0 ? 'positive' : currentMonthProfit < 0 ? 'negative' : 'neutral'}`;
+  }
+  if ($('#homeCurrentMonthMeta')) {
+    $('#homeCurrentMonthMeta').textContent = `${getScopeLabel(dashboardScope)}视角 · ${currentMonthKey.replace('-', '年')}月`;
+  }
+
+  if ($('#homeWeekDividend')) {
+    $('#homeWeekDividend').textContent = formatMoney(summary.week.dividend, { signed: false });
+    $('#homeWeekDividend').className = `overview-value ${summary.week.dividend > 0 ? 'positive' : summary.week.dividend < 0 ? 'negative' : 'neutral'}`;
+  }
+  if ($('#homeWeekDividendMeta')) {
+    $('#homeWeekDividendMeta').textContent = summary.week.tradeCount
+      ? `本周 ${summary.week.tradeCount} 笔交易`
+      : '本周还没有产生分红';
+  }
+
+  if ($('#homeFinancingCost')) {
+    $('#homeFinancingCost').textContent = formatMoney(summary.financingCost, { signed: false });
+    $('#homeFinancingCost').className = `overview-value ${summary.financingCost > 0 ? 'negative' : 'neutral'}`;
+  }
+  if ($('#homeFinancingCostMeta')) {
+    $('#homeFinancingCostMeta').textContent = summary.financingCost > 0
+      ? '已从信用收益中扣除'
+      : '当前还没有产生融资成本';
+  }
+}
+
+function updateRecordsPagination(totalDays) {
+  const meta = $('#recordsPageMeta');
+  const prevBtn = $('#btnRecordsPrev');
+  const nextBtn = $('#btnRecordsNext');
+  const totalPages = totalDays ? Math.ceil(totalDays / RECORDS_PAGE_SIZE) : 0;
+
+  if (meta) {
+    meta.textContent = totalPages
+      ? `第 ${recordsPage + 1} / ${totalPages} 页 · 共 ${totalDays} 个交易日`
+      : '共 0 页';
+  }
+
+  if (prevBtn) prevBtn.disabled = !totalPages || recordsPage <= 0;
+  if (nextBtn) nextBtn.disabled = !totalPages || recordsPage >= totalPages - 1;
+}
+
 function renderRecords() {
   const container = $('#recordsList');
-  const days = getFilteredRecordDays();
+  const allDays = getFilteredRecordDays();
+  const totalPages = allDays.length ? Math.ceil(allDays.length / RECORDS_PAGE_SIZE) : 0;
+
+  if (!totalPages) {
+    recordsPage = 0;
+  }
+
+  if (totalPages && recordsPage > totalPages - 1) {
+    recordsPage = totalPages - 1;
+  }
+
+  const days = totalPages
+    ? allDays.slice(recordsPage * RECORDS_PAGE_SIZE, (recordsPage + 1) * RECORDS_PAGE_SIZE)
+    : [];
+
+  updateRecordsPagination(allDays.length);
 
   if (!days.length) {
     container.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">🍪</div>
+        <div class="empty-icon">📄</div>
         <div class="empty-title">这个范围还没有记录</div>
         <div class="empty-desc">切换到其他视角，或者先录入 / 上传交易。</div>
       </div>
@@ -1938,7 +2078,9 @@ function renderAnalysisPage() {
   }
 
   updateScopeButtons('analysis', analysisScope);
-  updateMonthlyChart();
+  if (activeTab === 'analysis') {
+    updateMonthlyChart();
+  }
 }
 
 function renderDividendPage() {
@@ -2006,43 +2148,121 @@ function updateCsvStatus() {
     ? `最近 CSV 导入：${formatDateParts(SETTINGS.lastCsvImportAt).fullLabel}`
     : '还没有导入 CSV';
 
-  $('#csvImportStatus').textContent = label;
-  $('#csvSettingsHint').textContent = summary
-    ? `最近一次共读取 ${summary.totalRows} 行，导入 ${summary.importedRows} 行，忽略投信 ${summary.skippedInvestmentTrust} 行。`
-    : '支持券商约定履历 CSV；只导入株式現物和信用数据，并会用最新 CSV 重建券商记录。';
+  if ($('#csvImportStatus')) $('#csvImportStatus').textContent = label;
+  if ($('#csvSettingsHint')) {
+    $('#csvSettingsHint').textContent = summary
+      ? `最近一次共读取 ${summary.totalRows} 行，导入 ${summary.importedRows} 行，忽略投信 ${summary.skippedInvestmentTrust} 行。`
+      : '支持券商约定履历 CSV；只导入株式現物和信用数据，并会用最新 CSV 重建券商记录。';
+  }
 }
 
-function updateJsonbinSyncStatus(text) {
+function updateCloudSyncStatus(text) {
   const label = text || '从未同步';
-  $('#jsonbinSyncStatus').textContent = label;
-  $('#syncMiniStatus').textContent = label;
+  if ($('#cloudSyncStatus')) $('#cloudSyncStatus').textContent = label;
 }
 
-function initJsonbinSyncStatus() {
+function updateCloudAuthStatus(message = '') {
+  const statusEl = $('#cloudAuthStatus');
+  if (!statusEl) return;
+
+  if (message) {
+    statusEl.textContent = message;
+  } else if (!trimText(firebaseConfigText)) {
+    statusEl.textContent = '还没有填写 Firebase Web 配置。';
+  } else if (firebaseUser?.email) {
+    statusEl.textContent = `当前云账号：${maskEmail(firebaseUser.email)}`;
+  } else {
+    statusEl.textContent = 'Firebase 已连接，当前未登录。';
+  }
+
+  const isSignedIn = Boolean(firebaseUser?.uid);
+  if ($('#btnCloudPush')) $('#btnCloudPush').disabled = !isSignedIn || isCloudSyncing;
+  if ($('#btnCloudPull')) $('#btnCloudPull').disabled = !isSignedIn || isCloudSyncing;
+  if ($('#btnFirebaseSignOut')) $('#btnFirebaseSignOut').disabled = !isSignedIn;
+}
+
+function initCloudSyncStatus() {
   try {
-    const raw = localStorage.getItem('jsonbin_last_sync');
+    const raw = localStorage.getItem(CLOUD_SYNC_META_KEY);
     if (!raw) {
-      updateJsonbinSyncStatus('云端尚未同步');
+      updateCloudSyncStatus('云端尚未同步');
       return;
     }
 
     const data = JSON.parse(raw);
     const direction = data.dir === 'push' ? '上传' : '拉取';
-    updateJsonbinSyncStatus(`最近同步：${data.at}（${direction}）`);
+    const provider = data.provider ? ` · ${data.provider}` : '';
+    updateCloudSyncStatus(`最近同步：${data.at}（${direction}${provider}）`);
   } catch {
-    updateJsonbinSyncStatus('云端尚未同步');
+    updateCloudSyncStatus('云端尚未同步');
+  }
+}
+
+function fillSettingsForm() {
+  if ($('#firebaseConfigInput')) $('#firebaseConfigInput').value = firebaseConfigText;
+  if ($('#firebaseAuthEmail')) $('#firebaseAuthEmail').value = firebaseLastEmail;
+  if ($('#firebaseAuthPassword')) $('#firebaseAuthPassword').value = '';
+}
+
+function setActiveTab(tab) {
+  const nextTab = ['home', 'records', 'analysis', 'dividend', 'settings'].includes(tab) ? tab : 'home';
+  activeTab = nextTab;
+
+  const pageMap = {
+    home: '#mainPage',
+    records: '#recordsPage',
+    analysis: '#analysisPage',
+    dividend: '#dividendPage',
+    settings: '#settingsPage'
+  };
+
+  Object.entries(pageMap).forEach(([key, selector]) => {
+    const page = $(selector);
+    if (page) page.hidden = key !== nextTab;
+  });
+
+  $$('#bottomTabBar .tab-btn').forEach((button) => {
+    const isActive = button.dataset.tab === nextTab;
+    button.classList.toggle('active', isActive);
+    if (isActive) {
+      button.setAttribute('aria-current', 'page');
+    } else {
+      button.removeAttribute('aria-current');
+    }
+  });
+
+  if (nextTab === 'home') {
+    renderDashboardSummary();
+    renderHomeOverview();
+    updateChartButtons();
+    updateMainChart();
+  } else if (nextTab === 'records') {
+    renderRecords();
+  } else if (nextTab === 'analysis') {
+    renderAnalysisPage();
+  } else if (nextTab === 'dividend') {
+    renderDividendPage();
+  } else if (nextTab === 'settings') {
+    fillSettingsForm();
+    updateCsvStatus();
+    initCloudSyncStatus();
+    updateCloudAuthStatus();
   }
 }
 
 function refreshVisiblePages() {
   updateMonthFilter();
   renderDashboardSummary();
+  renderHomeOverview();
   renderRecords();
   renderAnalysisPage();
   renderDividendPage();
-  updateMainChart();
+  if (activeTab === 'home') {
+    updateMainChart();
+  }
   updateCsvStatus();
-  initJsonbinSyncStatus();
+  initCloudSyncStatus();
+  updateCloudAuthStatus();
 }
 
 // ===== Day Sheet =====
@@ -2483,82 +2703,129 @@ function saveRatioEditor() {
 
 // ===== Settings Sheet =====
 function openSettings() {
-  $('#settingsSheet').setAttribute('aria-hidden', 'false');
-  $('#jsonbinApiKey').value = jsonbinApiKey;
-  $('#jsonbinBinId').value = jsonbinBinId;
-  updateCsvStatus();
-  initJsonbinSyncStatus();
+  fillSettingsForm();
+  setActiveTab('settings');
 }
 
 function closeSettings() {
-  $('#settingsSheet').setAttribute('aria-hidden', 'true');
+  setActiveTab('home');
 }
 
 // ===== Pages =====
 function openAnalysisPage() {
-  $('#mainPage').hidden = true;
-  $('#analysisPage').hidden = false;
-  renderAnalysisPage();
+  setActiveTab('analysis');
 }
 
 function closeAnalysisPage() {
-  $('#analysisPage').hidden = true;
-  $('#mainPage').hidden = false;
+  setActiveTab('home');
 }
 
 function openDividendPage() {
-  $('#mainPage').hidden = true;
-  $('#dividendPage').hidden = false;
-  renderDividendPage();
+  setActiveTab('dividend');
 }
 
 function closeDividendPage() {
-  $('#dividendPage').hidden = true;
-  $('#mainPage').hidden = false;
+  setActiveTab('home');
 }
 
-// ===== JSONBin Sync =====
-function jsonbinXhr(method, url, body, headers) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open(method, url);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    Object.keys(headers || {}).forEach((key) => xhr.setRequestHeader(key, headers[key]));
+// ===== Firebase Cloud Sync =====
+function saveFirebaseConfigText(rawValue) {
+  const normalizedConfig = normalizeFirebaseConfig(parseFirebaseConfigInput(rawValue));
+  const nextText = JSON.stringify(normalizedConfig, null, 2);
+  const hasChanged = trimText(nextText) !== trimText(firebaseConfigText);
+  firebaseConfigText = nextText;
+  localStorage.setItem(FIREBASE_CONFIG_KEY, nextText);
+  return { normalizedConfig, hasChanged };
+}
 
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        const text = xhr.responseText || '';
-        if (!text.trim()) return resolve(null);
-        try {
-          resolve(JSON.parse(text));
-        } catch (error) {
-          reject(new Error(`响应解析失败：${error.message || error}`));
-        }
-        return;
+function collectFirebaseCredentials() {
+  const email = trimText($('#firebaseAuthEmail')?.value || firebaseLastEmail);
+  const password = $('#firebaseAuthPassword')?.value || '';
+  if (!email) throw new Error('请先填写登录邮箱。');
+  if (!password) throw new Error('请先填写登录密码。');
+  firebaseLastEmail = email;
+  localStorage.setItem(FIREBASE_LAST_EMAIL_KEY, email);
+  return { email, password };
+}
+
+async function ensureFirebaseReady() {
+  if (firebaseInitPromise) return firebaseInitPromise;
+
+  firebaseInitPromise = (async () => {
+    if (typeof firebase === 'undefined') {
+      throw new Error('Firebase SDK 加载失败，请检查网络后重试。');
+    }
+
+    const config = parseFirebaseConfigInput(firebaseConfigText);
+    const existingApp = firebase.apps?.[0] || null;
+    if (existingApp) {
+      const sameProject = existingApp.options?.projectId === config.projectId && existingApp.options?.appId === config.appId;
+      if (!sameProject) {
+        throw new Error('Firebase 配置已变更，请刷新页面后重新连接。');
       }
+      firebaseApp = existingApp;
+    } else {
+      firebaseApp = firebase.initializeApp(config);
+    }
 
-      try {
-        const parsed = JSON.parse(xhr.responseText || '{}');
-        reject(new Error(parsed.message || `请求失败 (${xhr.status})`));
-      } catch {
-        reject(new Error(`请求失败 (${xhr.status})`));
-      }
-    };
+    firebaseAuth = firebaseApp.auth();
+    firebaseDb = firebaseApp.firestore();
 
-    xhr.onerror = () => reject(new Error('网络请求失败，请检查网络。'));
-    xhr.ontimeout = () => reject(new Error('请求超时。'));
-    xhr.timeout = 30000;
-    xhr.send(body == null ? null : body);
+    if (!firebaseAuthObserverAttached) {
+      firebaseAuth.onAuthStateChanged((user) => {
+        firebaseUser = user || null;
+        updateCloudAuthStatus();
+      });
+      firebaseAuthObserverAttached = true;
+    }
+
+    await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    firebaseUser = firebaseAuth.currentUser || null;
+    updateCloudAuthStatus();
+    return { app: firebaseApp, auth: firebaseAuth, db: firebaseDb };
+  })().catch((error) => {
+    firebaseInitPromise = null;
+    throw error;
   });
+
+  return firebaseInitPromise;
 }
 
-function getCloudPayload() {
-  return {
-    version: APP_VERSION,
-    exportedAt: new Date().toISOString(),
-    settings: SETTINGS,
-    days: DAYS
+function createFirestoreBatchQueue(db) {
+  let batch = db.batch();
+  let operationCount = 0;
+  const commits = [];
+
+  const flush = () => {
+    if (!operationCount) return;
+    commits.push(batch.commit());
+    batch = db.batch();
+    operationCount = 0;
   };
+
+  return {
+    set(ref, value) {
+      if (operationCount >= 400) flush();
+      batch.set(ref, value);
+      operationCount += 1;
+    },
+    delete(ref) {
+      if (operationCount >= 400) flush();
+      batch.delete(ref);
+      operationCount += 1;
+    },
+    async commitAll() {
+      flush();
+      await Promise.all(commits);
+    }
+  };
+}
+
+function getCloudRootRef() {
+  if (!firebaseDb || !firebaseUser?.uid) {
+    throw new Error('请先登录 Firebase 云账号。');
+  }
+  return firebaseDb.collection('users').doc(firebaseUser.uid);
 }
 
 function mergeSettings(localSettings, remoteSettings) {
@@ -2633,97 +2900,166 @@ function mergeDays(localDays, cloudDays) {
   return Array.from(byDate.values()).sort(compareByDateAsc);
 }
 
-async function pushToJsonBin() {
-  const apiKey = trimText($('#jsonbinApiKey').value || jsonbinApiKey);
-  const binId = trimText($('#jsonbinBinId').value || jsonbinBinId);
-
-  if (!apiKey) {
-    alert('请先填写 JSONBin API Key。');
-    return;
-  }
-
-  if (isJsonbinSyncing) return;
-  isJsonbinSyncing = true;
-  updateJsonbinSyncStatus('正在上传到云端…');
-  $('#btnJsonbinPush').disabled = true;
-  $('#btnJsonbinPull').disabled = true;
-
+async function signUpWithFirebase() {
   try {
-    const body = JSON.stringify(getCloudPayload());
-    if (binId) {
-      await jsonbinXhr('PUT', `${JSONBIN_BASE}/${binId}`, body, { 'X-Master-Key': apiKey });
-    } else {
-      const data = await jsonbinXhr('POST', JSONBIN_BASE, body, {
-        'X-Master-Key': apiKey,
-        'X-Bin-Name': 'CookieWorkshop-TradeSync'
-      });
-      const createdId = String(data?.metadata?.id || data?.id || '');
-      if (createdId) {
-        jsonbinBinId = createdId;
-        localStorage.setItem('jsonbin_bin_id', createdId);
-        $('#jsonbinBinId').value = createdId;
-      }
-    }
-
-    jsonbinApiKey = apiKey;
-    localStorage.setItem('jsonbin_api_key', apiKey);
-    const at = new Date().toLocaleString('zh-CN');
-    localStorage.setItem('jsonbin_last_sync', JSON.stringify({ at, dir: 'push' }));
-    initJsonbinSyncStatus();
-    alert('已上传到云端。下一次上传会用本地数据整体覆盖云端。');
+    saveFirebaseConfigText($('#firebaseConfigInput').value || firebaseConfigText);
+    await ensureFirebaseReady();
+    const { email, password } = collectFirebaseCredentials();
+    await firebaseAuth.createUserWithEmailAndPassword(email, password);
+    $('#firebaseAuthPassword').value = '';
+    updateCloudAuthStatus();
+    alert('Firebase 云账号已创建并登录。现在可以在多设备上用同一邮箱密码同步。');
   } catch (error) {
-    updateJsonbinSyncStatus('');
-    alert(`上传失败：${error.message || error}`);
-  } finally {
-    isJsonbinSyncing = false;
-    $('#btnJsonbinPush').disabled = false;
-    $('#btnJsonbinPull').disabled = false;
+    updateCloudAuthStatus(error.message || String(error));
+    alert(`注册失败：${error.message || error}`);
   }
 }
 
-async function pullFromJsonBin() {
-  const apiKey = trimText($('#jsonbinApiKey').value || jsonbinApiKey);
-  const binId = trimText($('#jsonbinBinId').value || jsonbinBinId);
+async function signInWithFirebase() {
+  try {
+    saveFirebaseConfigText($('#firebaseConfigInput').value || firebaseConfigText);
+    await ensureFirebaseReady();
+    const { email, password } = collectFirebaseCredentials();
+    await firebaseAuth.signInWithEmailAndPassword(email, password);
+    $('#firebaseAuthPassword').value = '';
+    updateCloudAuthStatus();
+    alert('已登录 Firebase 云账号。');
+  } catch (error) {
+    updateCloudAuthStatus(error.message || String(error));
+    alert(`登录失败：${error.message || error}`);
+  }
+}
 
-  if (!apiKey) {
-    alert('请先填写 JSONBin API Key。');
+async function signOutFromFirebase() {
+  try {
+    await ensureFirebaseReady();
+    await firebaseAuth.signOut();
+    updateCloudAuthStatus();
+    alert('已退出 Firebase 云账号。');
+  } catch (error) {
+    alert(`退出失败：${error.message || error}`);
+  }
+}
+
+async function saveFirebaseConfigFromSettings() {
+  try {
+    const { normalizedConfig, hasChanged } = saveFirebaseConfigText($('#firebaseConfigInput').value || '');
+    if (firebaseApp && hasChanged) {
+      const sameProject = firebaseApp.options?.projectId === normalizedConfig.projectId && firebaseApp.options?.appId === normalizedConfig.appId;
+      if (!sameProject) {
+        updateCloudAuthStatus('Firebase 配置已保存，请刷新页面后重新连接。');
+        alert('Firebase 配置已保存。因为你切换了项目，请刷新页面后再登录。');
+        return;
+      }
+    }
+
+    await ensureFirebaseReady();
+    updateCloudAuthStatus(firebaseUser?.uid ? `当前云账号：${maskEmail(firebaseUser.email || '')}` : 'Firebase 配置已保存，可以继续登录。');
+    alert('Firebase 配置已保存。');
+  } catch (error) {
+    updateCloudAuthStatus(error.message || String(error));
+    alert(`配置保存失败：${error.message || error}`);
+  }
+}
+
+async function initializeCloudSessionSilently() {
+  if (!trimText(firebaseConfigText)) {
+    updateCloudAuthStatus();
     return;
   }
-  if (!binId) {
-    alert('请先填写 Bin ID。');
-    return;
-  }
-
-  if (isJsonbinSyncing) return;
-  isJsonbinSyncing = true;
-  updateJsonbinSyncStatus('正在从云端拉取…');
-  $('#btnJsonbinPush').disabled = true;
-  $('#btnJsonbinPull').disabled = true;
 
   try {
-    const data = await jsonbinXhr('GET', `${JSONBIN_BASE}/${binId}?meta=false`, null, { 'X-Master-Key': apiKey });
-    const cloudDays = Array.isArray(data?.days) ? data.days : [];
+    await ensureFirebaseReady();
+  } catch (error) {
+    console.warn('Firebase init skipped:', error);
+    updateCloudAuthStatus(`Firebase 未连接：${error.message || error}`);
+  }
+}
+
+async function pushToCloud() {
+  if (isCloudSyncing) return;
+  isCloudSyncing = true;
+  updateCloudAuthStatus();
+  updateCloudSyncStatus('正在上传到 Firebase…');
+
+  try {
+    await ensureFirebaseReady();
+    const rootRef = getCloudRootRef();
+    const daysRef = rootRef.collection('days');
+    const settingsRef = rootRef.collection('meta').doc('settings');
+    const localDays = DAYS.map(normalizeDay).sort(compareByDateAsc);
+    const localDayMap = new Map(localDays.map((day) => [day.date, day]));
+    const remoteSnapshot = await daysRef.get();
+    const queue = createFirestoreBatchQueue(firebaseDb);
+
+    remoteSnapshot.forEach((doc) => {
+      if (!localDayMap.has(doc.id)) {
+        queue.delete(doc.ref);
+      }
+    });
+
+    localDayMap.forEach((day, date) => {
+      queue.set(daysRef.doc(date), normalizeDay(day));
+    });
+
+    queue.set(settingsRef, {
+      data: normalizeSettings(SETTINGS),
+      updatedAt: new Date().toISOString(),
+      version: APP_VERSION
+    });
+
+    await queue.commitAll();
+
+    const at = new Date().toLocaleString('zh-CN');
+    localStorage.setItem(CLOUD_SYNC_META_KEY, JSON.stringify({ at, dir: 'push', provider: 'Firebase' }));
+    initCloudSyncStatus();
+    alert('已上传到 Firebase。云端券商/手动数据现在会和本地保持同一份镜像。');
+  } catch (error) {
+    updateCloudSyncStatus('云端同步失败');
+    alert(`上传失败：${error.message || error}`);
+  } finally {
+    isCloudSyncing = false;
+    updateCloudAuthStatus();
+  }
+}
+
+async function pullFromCloud() {
+  if (isCloudSyncing) return;
+  isCloudSyncing = true;
+  updateCloudAuthStatus();
+  updateCloudSyncStatus('正在从 Firebase 拉取…');
+
+  try {
+    await ensureFirebaseReady();
+    const rootRef = getCloudRootRef();
+    const [daysSnapshot, settingsSnapshot] = await Promise.all([
+      rootRef.collection('days').get(),
+      rootRef.collection('meta').doc('settings').get()
+    ]);
+
+    const cloudDays = daysSnapshot.docs.map((doc) => normalizeDay({
+      ...doc.data(),
+      date: doc.id
+    }));
+    const cloudSettings = settingsSnapshot.exists
+      ? normalizeSettings(settingsSnapshot.data()?.data || settingsSnapshot.data())
+      : null;
+
     const mergedDays = mergeDays(DAYS, cloudDays);
-    SETTINGS = mergeSettings(SETTINGS, data?.settings);
+    SETTINGS = mergeSettings(SETTINGS, cloudSettings);
     persistSettings();
     await replaceAllDays(mergedDays);
 
-    jsonbinApiKey = apiKey;
-    jsonbinBinId = binId;
-    localStorage.setItem('jsonbin_api_key', apiKey);
-    localStorage.setItem('jsonbin_bin_id', binId);
-
     const at = new Date().toLocaleString('zh-CN');
-    localStorage.setItem('jsonbin_last_sync', JSON.stringify({ at, dir: 'pull' }));
+    localStorage.setItem(CLOUD_SYNC_META_KEY, JSON.stringify({ at, dir: 'pull', provider: 'Firebase' }));
     await refresh();
-    alert('已从云端拉取并合并。');
+    alert('已从 Firebase 拉取并合并。');
   } catch (error) {
-    updateJsonbinSyncStatus('');
+    updateCloudSyncStatus('云端同步失败');
     alert(`拉取失败：${error.message || error}`);
   } finally {
-    isJsonbinSyncing = false;
-    $('#btnJsonbinPush').disabled = false;
-    $('#btnJsonbinPull').disabled = false;
+    isCloudSyncing = false;
+    updateCloudAuthStatus();
   }
 }
 
@@ -2736,17 +3072,10 @@ async function refresh() {
 
 // ===== Event Bindings =====
 function bindEvents() {
-  $('#btnSettings').addEventListener('click', openSettings);
-  $('#btnCloseSettings').addEventListener('click', closeSettings);
-  $('#settingsBackdrop').addEventListener('click', closeSettings);
+  $$('#bottomTabBar .tab-btn').forEach((button) => {
+    button.addEventListener('click', () => setActiveTab(button.dataset.tab));
+  });
 
-  $('#btnAnalysis').addEventListener('click', openAnalysisPage);
-  $('#btnBackFromAnalysis').addEventListener('click', closeAnalysisPage);
-
-  $('#btnDividend').addEventListener('click', openDividendPage);
-  $('#btnBackFromDividend').addEventListener('click', closeDividendPage);
-
-  $('#btnUploadCsv').addEventListener('click', () => $('#csvFileInput').click());
   $('#btnUploadCsvFromSettings').addEventListener('click', () => $('#csvFileInput').click());
   $('#csvFileInput').addEventListener('change', async (event) => {
     const file = event.target.files?.[0];
@@ -2754,7 +3083,6 @@ function bindEvents() {
 
     try {
       const summary = await importCsvFile(file);
-      closeSettings();
       alert(`CSV 导入完成：导入 ${summary.importedRows} 行，忽略投信 ${summary.skippedInvestmentTrust} 行。旧的 CSV 券商记录已用这份文件重建，手动录入会保留。`);
     } catch (error) {
       alert(`CSV 导入失败：${error.message || error}`);
@@ -2771,9 +3099,13 @@ function bindEvents() {
 
       if (owner === 'dashboard') {
         dashboardScope = scope;
+        recordsPage = 0;
         renderDashboardSummary();
+        renderHomeOverview();
         renderRecords();
-        updateMainChart();
+        if (activeTab === 'home') {
+          updateMainChart();
+        }
       } else if (owner === 'analysis') {
         analysisScope = scope;
         renderAnalysisPage();
@@ -2801,6 +3133,18 @@ function bindEvents() {
 
   $('#monthFilter').addEventListener('change', (event) => {
     currentMonthFilter = event.target.value;
+    recordsPage = 0;
+    renderRecords();
+  });
+
+  $('#btnRecordsPrev').addEventListener('click', () => {
+    recordsPage = Math.max(0, recordsPage - 1);
+    renderRecords();
+  });
+
+  $('#btnRecordsNext').addEventListener('click', () => {
+    const totalPages = Math.ceil(getFilteredRecordDays().length / RECORDS_PAGE_SIZE);
+    recordsPage = Math.min(Math.max(0, totalPages - 1), recordsPage + 1);
     renderRecords();
   });
 
@@ -2872,24 +3216,26 @@ function bindEvents() {
   $('#btnCancelRatioEdit').addEventListener('click', closeRatioEditor);
   $('#btnSaveRatioEdit').addEventListener('click', saveRatioEditor);
 
-  $('#jsonbinApiKey').addEventListener('input', (event) => {
-    jsonbinApiKey = trimText(event.target.value);
-    localStorage.setItem('jsonbin_api_key', jsonbinApiKey);
+  $('#firebaseAuthEmail').addEventListener('input', (event) => {
+    firebaseLastEmail = trimText(event.target.value);
+    localStorage.setItem(FIREBASE_LAST_EMAIL_KEY, firebaseLastEmail);
   });
-  $('#jsonbinBinId').addEventListener('input', (event) => {
-    jsonbinBinId = trimText(event.target.value);
-    localStorage.setItem('jsonbin_bin_id', jsonbinBinId);
-  });
-  $('#btnJsonbinPush').addEventListener('click', pushToJsonBin);
-  $('#btnJsonbinPull').addEventListener('click', pullFromJsonBin);
+  $('#btnSaveFirebaseConfig').addEventListener('click', saveFirebaseConfigFromSettings);
+  $('#btnFirebaseSignUp').addEventListener('click', signUpWithFirebase);
+  $('#btnFirebaseSignIn').addEventListener('click', signInWithFirebase);
+  $('#btnFirebaseSignOut').addEventListener('click', signOutFromFirebase);
+  $('#btnCloudPush').addEventListener('click', pushToCloud);
+  $('#btnCloudPull').addEventListener('click', pullFromCloud);
 
   $('#btnClearAll').addEventListener('click', async () => {
     if (!confirm('确定要清空所有本地交易数据吗？这一步不可撤销。')) return;
     await clearAllDays();
     SETTINGS = createDefaultSettings();
     persistSettings();
+    localStorage.removeItem(CLOUD_SYNC_META_KEY);
     localStorage.removeItem('jsonbin_last_sync');
-    closeSettings();
+    localStorage.removeItem('jsonbin_api_key');
+    localStorage.removeItem('jsonbin_bin_id');
     await refresh();
   });
 }
@@ -2900,9 +3246,10 @@ async function init() {
   await loadCompanyData();
   createMainChart();
   bindEvents();
-  $('#jsonbinApiKey').value = jsonbinApiKey;
-  $('#jsonbinBinId').value = jsonbinBinId;
   updateChartButtons();
+  fillSettingsForm();
+  setActiveTab(activeTab);
+  await initializeCloudSessionSilently();
   await refresh();
 }
 

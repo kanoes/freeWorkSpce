@@ -1,5 +1,5 @@
 /* 甜饼工坊 Service Worker */
-const CACHE_NAME = 'cookie-workshop-v4.1';
+const CACHE_NAME = 'cookie-workshop-v4.2';
 const ASSETS = [
   './',
   './index.html',
@@ -33,9 +33,14 @@ self.addEventListener('activate', (event) => {
 // Fetch event - serve from cache, fallback to network
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+  const url = request.url;
   
-  // 直接放行 JSONBin：避免 SW 影响跨域 POST/PUT，防止部分环境出现 TypeError
-  if (request.url.indexOf('api.jsonbin.io') !== -1) {
+  // 直接放行 Firebase / Google APIs：避免 SW 干扰认证、Firestore 实时通道和 SDK 资源
+  if (
+    url.indexOf('firebase') !== -1
+    || url.indexOf('googleapis.com') !== -1
+    || url.indexOf('gstatic.com/firebasejs') !== -1
+  ) {
     event.respondWith(fetch(request));
     return;
   }
