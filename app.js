@@ -27,6 +27,8 @@ const SETTINGS_KEY = 'trade_diary_settings_v4';
 const JSONBIN_BASE = 'https://api.jsonbin.io/v3/b';
 const DIVIDEND_START_DATE = '2026-04-01';
 const SCOPES = ['all', 'cash', 'margin'];
+const MARGIN_INTEREST_RATE = 0.028;
+const DAYS_IN_YEAR = 365;
 
 const generateId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 const deepClone = (value) => {
@@ -183,9 +185,26 @@ function getCurrentWeekMondayStr() {
   return todayStr(now);
 }
 
+function toDateStartTimestamp(dateStr) {
+  const normalized = normalizeAnyDate(dateStr);
+  if (!normalized) return Number.NaN;
+  const [year, month, day] = normalized.split('-').map(Number);
+  return new Date(year, month - 1, day).getTime();
+}
+
+function calculateInclusiveHoldingDays(openDate, closeDate) {
+  const openTime = toDateStartTimestamp(openDate);
+  const closeTime = toDateStartTimestamp(closeDate);
+  if (!Number.isFinite(openTime) || !Number.isFinite(closeTime)) return 1;
+  const dayDiff = Math.floor((closeTime - openTime) / 86400000);
+  return Math.max(1, dayDiff + 1);
+}
+
 function createScopeDayState() {
   return {
+    grossProfit: 0,
     profit: 0,
+    financingCost: 0,
     dividend: 0,
     tradeCount: 0,
     closeTradeCount: 0,
@@ -199,7 +218,9 @@ function createScopeDayState() {
 
 function createScopeSummary() {
   return {
+    grossProfit: 0,
     totalProfit: 0,
+    financingCost: 0,
     activeDays: 0,
     winDays: 0,
     lossDays: 0,
@@ -218,8 +239,8 @@ function createScopeSummary() {
     totalDividend: 0,
     totalLossShare: 0,
     netDividend: 0,
-    today: { profit: 0, dividend: 0, tradeCount: 0 },
-    week: { profit: 0, dividend: 0, tradeCount: 0 }
+    today: { profit: 0, dividend: 0, tradeCount: 0, financingCost: 0 },
+    week: { profit: 0, dividend: 0, tradeCount: 0, financingCost: 0 }
   };
 }
 
@@ -1107,7 +1128,7 @@ async function importCsvFile(file) {
 }
 
 // ===== Analytics =====
-function addLongPosition(map, trade, quantity, totalCost) {
+function addLongPosition(map, trade, quantity, totalCost, openedDate = '') {
   const symbol = trade.symbol;
   if (!map.has(symbol)) {
     map.set(symbol, {
@@ -1115,7 +1136,8 @@ function addLongPosition(map, trade, quantity, totalCost) {
       name: getStockDisplayName(symbol, trade.name),
       quantity: 0,
       totalCost: 0,
-      market: trade.market
+      market: trade.market,
+      lots: []
     });
   }
 
@@ -1124,15 +1146,93 @@ function addLongPosition(map, trade, quantity, totalCost) {
   position.market = trade.market || position.market || 'tse';
   position.quantity += quantity;
   position.totalCost += totalCost;
+
+  if (quantity > 0 && totalCost > 0) {
+    position.lots.push({
+      openDate: normalizeAnyDate(openedDate) || '',
+      quantity,
+      totalCost
+    });
+  }
 }
 
-function closeLongPosition(map, symbol, quantity, revenue) {
+function reduceLongLots(position, closeQty, closeDate, applyFinancing = false) {
+  if (!Array.isArray(position?.lots) || !position.lots.length) {
+    return { financingCost: 0, weightedHoldingDays: 0 };
+  }
+
+  const totalQuantity = Number(position.quantity) || 0;
+  if (totalQuantity <= 0 || closeQty <= 0) {
+    return { financingCost: 0, weightedHoldingDays: 0 };
+  }
+
+  const closeRatio = Math.min(1, closeQty / totalQuantity);
+  let financingCost = 0;
+  let weightedHoldingDays = 0;
+
+  position.lots = position.lots
+    .map((lot) => {
+      const lotQuantity = Number(lot.quantity) || 0;
+      const lotTotalCost = Number(lot.totalCost) || 0;
+      if (lotQuantity <= 0 || lotTotalCost <= 0) return null;
+
+      const closedQuantity = lotQuantity * closeRatio;
+      const closedCost = lotTotalCost * closeRatio;
+
+      if (applyFinancing && closedCost > 0) {
+        const holdingDays = calculateInclusiveHoldingDays(lot.openDate, closeDate);
+        financingCost += (closedCost * MARGIN_INTEREST_RATE * holdingDays) / DAYS_IN_YEAR;
+        weightedHoldingDays += closedQuantity * holdingDays;
+      }
+
+      const nextQuantity = lotQuantity - closedQuantity;
+      const nextTotalCost = lotTotalCost - closedCost;
+
+      if (nextQuantity <= 1e-8 || nextTotalCost <= 1e-8) return null;
+      return {
+        ...lot,
+        quantity: nextQuantity,
+        totalCost: nextTotalCost
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    financingCost,
+    weightedHoldingDays
+  };
+}
+
+function closeLongPosition(map, symbol, quantity, revenue, closeDate, options = {}) {
+  const { applyFinancing = false } = options;
   const position = map.get(symbol);
-  if (!position || position.quantity <= 0) return 0;
+  if (!position || position.quantity <= 0) {
+    return {
+      closeQty: 0,
+      grossProfit: 0,
+      financingCost: 0,
+      netProfit: 0,
+      averageHoldingDays: 0
+    };
+  }
 
   const closeQty = Math.min(quantity, position.quantity);
+  if (closeQty <= 0) {
+    return {
+      closeQty: 0,
+      grossProfit: 0,
+      financingCost: 0,
+      netProfit: 0,
+      averageHoldingDays: 0
+    };
+  }
+
   const avgCost = position.totalCost / position.quantity;
   const costBasis = avgCost * closeQty;
+  const grossProfit = revenue - costBasis;
+  const lotResult = reduceLongLots(position, closeQty, closeDate, applyFinancing);
+  const financingCost = applyFinancing ? lotResult.financingCost : 0;
+
   position.quantity -= closeQty;
   position.totalCost -= costBasis;
 
@@ -1140,7 +1240,13 @@ function closeLongPosition(map, symbol, quantity, revenue) {
     map.delete(symbol);
   }
 
-  return revenue - costBasis;
+  return {
+    closeQty,
+    grossProfit,
+    financingCost,
+    netProfit: grossProfit - financingCost,
+    averageHoldingDays: closeQty > 0 ? lotResult.weightedHoldingDays / closeQty : 0
+  };
 }
 
 function addShortPosition(map, trade, quantity, totalEntry) {
@@ -1220,24 +1326,41 @@ function buildAnalytics(days) {
         : grossAmount - fee - taxAmount;
 
       let realizedProfit = 0;
+      let grossRealizedProfit = 0;
+      let financingCost = 0;
+      let averageHoldingDays = 0;
 
       if (normalizedTrade.assetType === 'cash') {
         if (normalizedTrade.action === 'buy') {
-          addLongPosition(cashPositions, normalizedTrade, quantity, buyCost);
+          addLongPosition(cashPositions, normalizedTrade, quantity, buyCost, day.date);
         } else {
-          realizedProfit = closeLongPosition(cashPositions, normalizedTrade.symbol, quantity, sellRevenue);
+          const closeResult = closeLongPosition(cashPositions, normalizedTrade.symbol, quantity, sellRevenue, day.date);
+          realizedProfit = closeResult.netProfit;
+          grossRealizedProfit = closeResult.grossProfit;
         }
       } else if (normalizedTrade.positionSide === 'short') {
         if (normalizedTrade.positionEffect === 'open') {
           addShortPosition(marginShortPositions, normalizedTrade, quantity, grossAmount - fee - taxAmount);
         } else {
           realizedProfit = closeShortPosition(marginShortPositions, normalizedTrade.symbol, quantity, grossAmount + fee + taxAmount);
+          grossRealizedProfit = realizedProfit;
         }
       } else {
         if (normalizedTrade.positionEffect === 'open') {
-          addLongPosition(marginLongPositions, normalizedTrade, quantity, grossAmount + fee + taxAmount);
+          addLongPosition(marginLongPositions, normalizedTrade, quantity, grossAmount + fee + taxAmount, day.date);
         } else {
-          realizedProfit = closeLongPosition(marginLongPositions, normalizedTrade.symbol, quantity, grossAmount - fee - taxAmount);
+          const closeResult = closeLongPosition(
+            marginLongPositions,
+            normalizedTrade.symbol,
+            quantity,
+            grossAmount - fee - taxAmount,
+            day.date,
+            { applyFinancing: true }
+          );
+          realizedProfit = closeResult.netProfit;
+          grossRealizedProfit = closeResult.grossProfit;
+          financingCost = closeResult.financingCost;
+          averageHoldingDays = closeResult.averageHoldingDays;
         }
       }
 
@@ -1248,6 +1371,9 @@ function buildAnalytics(days) {
       const enrichedTrade = {
         ...normalizedTrade,
         realizedProfit,
+        grossRealizedProfit,
+        financingCost,
+        averageHoldingDays,
         dividendAmount,
         dayDate: day.date
       };
@@ -1258,7 +1384,9 @@ function buildAnalytics(days) {
       const targets = [dayView.scopes.all, dayView.scopes[normalizedTrade.assetType]];
       targets.forEach((scopeState) => {
         scopeState.tradeCount += 1;
+        scopeState.grossProfit += grossRealizedProfit;
         scopeState.profit += realizedProfit;
+        scopeState.financingCost += financingCost;
         scopeState.dividend += dividendAmount;
         scopeState.symbols.add(normalizedTrade.symbol || normalizedTrade.name || '');
 
@@ -1327,6 +1455,8 @@ function buildAnalytics(days) {
       if (!scopeDay.tradeCount) return;
 
       summary.totalProfit += scopeDay.profit;
+      summary.grossProfit += scopeDay.grossProfit;
+      summary.financingCost += scopeDay.financingCost;
       summary.activeDays += 1;
       summary.tradeCount += scopeDay.tradeCount;
       summary.buyCount += scopeDay.buyCount;
@@ -1341,7 +1471,8 @@ function buildAnalytics(days) {
         summary.today = {
           profit: scopeDay.profit,
           dividend: scopeDay.dividend,
-          tradeCount: scopeDay.tradeCount
+          tradeCount: scopeDay.tradeCount,
+          financingCost: scopeDay.financingCost
         };
       }
 
@@ -1349,6 +1480,7 @@ function buildAnalytics(days) {
         summary.week.profit += scopeDay.profit;
         summary.week.dividend += scopeDay.dividend;
         summary.week.tradeCount += scopeDay.tradeCount;
+        summary.week.financingCost += scopeDay.financingCost;
       }
 
       if (day.date >= DIVIDEND_START_DATE && scopeDay.dividend !== 0) {
@@ -1643,7 +1775,9 @@ function renderDashboardSummary() {
   $('#summaryTradeDays').textContent = summary.activeDays;
   $('#summaryWinRate').textContent = formatPercent(summary.winRate);
   $('#summaryOpenPositions').textContent = summary.positionsCount;
-  $('#summaryProfitNote').textContent = `${summary.closeTradeCount} 笔已实现平仓/卖出`;
+  $('#summaryProfitNote').textContent = summary.financingCost > 0
+    ? `${summary.closeTradeCount} 笔已实现平仓/卖出 · 已扣融资成本 ${formatMoney(summary.financingCost, { signed: false })}`
+    : `${summary.closeTradeCount} 笔已实现平仓/卖出`;
   updateScopeButtons('dashboard', dashboardScope);
 }
 
@@ -1688,7 +1822,7 @@ function renderRecords() {
         </div>
         <div class="record-tags">${badgeHtml.join('')}</div>
         <div class="record-meta">${escapeHtml(symbols.join('、') || '暂无标的')}</div>
-        <div class="record-meta">分红 ${formatMoney(scopeDay.dividend)} · 交易 ${scopeDay.tradeCount} 笔</div>
+        <div class="record-meta">分红 ${formatMoney(scopeDay.dividend)}${scopeDay.financingCost > 0 ? ` · 融资成本 ${formatMoney(scopeDay.financingCost, { signed: false })}` : ''} · 交易 ${scopeDay.tradeCount} 笔</div>
       </article>
     `;
   }).join('');
@@ -1713,6 +1847,7 @@ function renderAnalysisPage() {
   $('#analysisBuyCount').textContent = summary.buyCount;
   $('#analysisSellCount').textContent = summary.sellCount;
   $('#analysisAvgTrades').textContent = summary.activeDays ? (summary.tradeCount / summary.activeDays).toFixed(1) : '0';
+  $('#analysisFinancingCost').textContent = formatMoney(summary.financingCost, { signed: false });
 
   const positionsList = $('#positionsList');
   if (!summary.positions.length) {
@@ -2104,9 +2239,12 @@ function updateDaySheetSummary() {
   const preview = buildAnalytics(previewDays);
   const previewDay = preview.daysDesc.find((day) => day.date === date);
   const profit = previewDay ? previewDay.scopes.all.profit : 0;
+  const financingCost = previewDay ? previewDay.scopes.all.financingCost : 0;
   const className = profit > 0 ? 'positive' : profit < 0 ? 'negative' : 'neutral';
   const summaryEl = $('#daySheetSummary');
-  summaryEl.textContent = `当日已实现损益：${formatMoney(profit)}`;
+  summaryEl.textContent = financingCost > 0
+    ? `当日已实现损益：${formatMoney(profit)}（已扣融资成本 ${formatMoney(financingCost, { signed: false })}）`
+    : `当日已实现损益：${formatMoney(profit)}`;
   summaryEl.className = `day-sheet-summary ${className}`;
 }
 
