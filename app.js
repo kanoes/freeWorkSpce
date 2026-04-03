@@ -1665,6 +1665,7 @@ let firebaseUser = null;
 let firebaseInitPromise = null;
 let firebaseAuthObserverAttached = false;
 let firebaseRedirectHandled = false;
+let firebasePendingPostLoginSync = false;
 
 // ===== Charts =====
 function getScopeAccent(scope) {
@@ -2188,7 +2189,7 @@ function initCloudSyncStatus() {
   try {
     const raw = localStorage.getItem(CLOUD_SYNC_META_KEY);
     if (!raw) {
-      updateCloudSyncStatus('云端尚未同步');
+      updateCloudSyncStatus(firebaseUser?.uid ? '已登录，尚未同步数据' : '云端尚未同步');
       return;
     }
 
@@ -2197,7 +2198,7 @@ function initCloudSyncStatus() {
     const provider = data.provider ? ` · ${data.provider}` : '';
     updateCloudSyncStatus(`最近同步：${data.at}（${direction}${provider}）`);
   } catch {
-    updateCloudSyncStatus('云端尚未同步');
+    updateCloudSyncStatus(firebaseUser?.uid ? '已登录，尚未同步数据' : '云端尚未同步');
   }
 }
 
@@ -2760,14 +2761,22 @@ async function resolveFirebaseRedirectResult() {
     const result = await firebaseAuth.getRedirectResult();
     if (result?.user) {
       firebaseUser = result.user;
+      firebasePendingPostLoginSync = true;
       updateCloudAuthStatus();
-      alert('已完成 Google 登录。');
+      updateCloudSyncStatus('Google 登录成功，正在同步云端数据…');
+      alert('已完成 Google 登录，正在同步云端数据。');
     }
   } catch (error) {
     console.warn('Firebase redirect sign-in failed:', error);
     updateCloudAuthStatus(error.message || String(error));
     alert(`Google 登录失败：${error.message || error}`);
   }
+}
+
+async function syncCloudAfterLogin() {
+  if (!firebasePendingPostLoginSync || !firebaseUser?.uid) return;
+  firebasePendingPostLoginSync = false;
+  await pullFromCloud({ notify: false });
 }
 
 async function ensureFirebaseReady() {
@@ -2937,8 +2946,11 @@ async function signInWithGoogle() {
 
     const result = await firebaseAuth.signInWithPopup(provider);
     firebaseUser = result.user || firebaseAuth.currentUser || null;
+    firebasePendingPostLoginSync = true;
     updateCloudAuthStatus();
-    alert('已登录 Firebase 云账号。');
+    updateCloudSyncStatus('Google 登录成功，正在同步云端数据…');
+    await syncCloudAfterLogin();
+    alert('已登录 Firebase 云账号，并已同步云端数据。');
   } catch (error) {
     if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(error?.code || '')) {
       try {
@@ -2996,13 +3008,15 @@ async function initializeCloudSessionSilently() {
 
   try {
     await ensureFirebaseReady();
+    await syncCloudAfterLogin();
   } catch (error) {
     console.warn('Firebase init skipped:', error);
     updateCloudAuthStatus(`Firebase 未连接：${error.message || error}`);
   }
 }
 
-async function pushToCloud() {
+async function pushToCloud(options = {}) {
+  const notify = options?.notify !== false;
   if (isCloudSyncing) return;
   isCloudSyncing = true;
   updateCloudAuthStatus();
@@ -3039,17 +3053,22 @@ async function pushToCloud() {
     const at = new Date().toLocaleString('zh-CN');
     localStorage.setItem(CLOUD_SYNC_META_KEY, JSON.stringify({ at, dir: 'push', provider: 'Firebase' }));
     initCloudSyncStatus();
-    alert('已上传到 Firebase。云端券商/手动数据现在会和本地保持同一份镜像。');
+    if (notify) {
+      alert('已上传到 Firebase。云端券商/手动数据现在会和本地保持同一份镜像。');
+    }
   } catch (error) {
     updateCloudSyncStatus('云端同步失败');
-    alert(`上传失败：${error.message || error}`);
+    if (notify) {
+      alert(`上传失败：${error.message || error}`);
+    }
   } finally {
     isCloudSyncing = false;
     updateCloudAuthStatus();
   }
 }
 
-async function pullFromCloud() {
+async function pullFromCloud(options = {}) {
+  const notify = options?.notify !== false;
   if (isCloudSyncing) return;
   isCloudSyncing = true;
   updateCloudAuthStatus();
@@ -3079,10 +3098,14 @@ async function pullFromCloud() {
     const at = new Date().toLocaleString('zh-CN');
     localStorage.setItem(CLOUD_SYNC_META_KEY, JSON.stringify({ at, dir: 'pull', provider: 'Firebase' }));
     await refresh();
-    alert('已从 Firebase 拉取并合并。');
+    if (notify) {
+      alert('已从 Firebase 拉取并合并。');
+    }
   } catch (error) {
     updateCloudSyncStatus('云端同步失败');
-    alert(`拉取失败：${error.message || error}`);
+    if (notify) {
+      alert(`拉取失败：${error.message || error}`);
+    }
   } finally {
     isCloudSyncing = false;
     updateCloudAuthStatus();
