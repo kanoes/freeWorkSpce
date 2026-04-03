@@ -912,6 +912,18 @@ textarea:focus {
   line-height: 1.6;
 }
 
+.settings-meta-line {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.settings-meta-line strong {
+  color: var(--text);
+  font-weight: 800;
+}
+
 .danger-zone {
   border-color: rgba(207, 92, 92, 0.18);
 }

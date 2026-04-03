@@ -1,4 +1,4 @@
-// ===== 甜饼工坊 App v4.0 =====
+// ===== 甜饼工坊 App v4.1.0 =====
 // 聚焦 CSV 上传、云同步、现物/信用分开统计、分红快照规则
 
 if ('serviceWorker' in navigator) {
@@ -22,7 +22,7 @@ if ('serviceWorker' in navigator) {
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
-const APP_VERSION = '4.0';
+const APP_VERSION = '4.1.0';
 const SETTINGS_KEY = 'trade_diary_settings_v4';
 const CLOUD_SYNC_META_KEY = 'trade_diary_cloud_last_sync_v1';
 const FIREBASE_CONFIG_KEY = 'trade_diary_firebase_config_v1';
@@ -327,7 +327,7 @@ let companyMap = new Map();
 
 async function loadCompanyData() {
   try {
-    const response = await fetch('./companies_tse.json');
+    const response = await fetch(`./companies_tse.json?v=${encodeURIComponent(APP_VERSION)}`);
     if (!response.ok) return;
 
     const data = await response.json();
@@ -2206,6 +2206,7 @@ function initCloudSyncStatus() {
 
 function fillSettingsForm() {
   if ($('#firebaseConfigInput')) $('#firebaseConfigInput').value = firebaseConfigText;
+  if ($('#appBuildLabel')) $('#appBuildLabel').textContent = `v${APP_VERSION}`;
 }
 
 function setActiveTab(tab) {
