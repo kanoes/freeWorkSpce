@@ -3161,16 +3161,15 @@ async function pullFromCloud(options = {}) {
       ? normalizeSettings(settingsSnapshot.data()?.data || settingsSnapshot.data())
       : null;
 
-    const mergedDays = mergeDays(DAYS, cloudDays);
-    SETTINGS = mergeSettings(SETTINGS, cloudSettings);
+    SETTINGS = cloudSettings ? normalizeSettings(cloudSettings) : createDefaultSettings();
     persistSettings();
-    await replaceAllDays(mergedDays);
+    await replaceAllDays(cloudDays.sort(compareByDateAsc));
 
     const at = new Date().toLocaleString('zh-CN');
     localStorage.setItem(CLOUD_SYNC_META_KEY, JSON.stringify({ at, dir: 'pull', provider: 'Firebase' }));
     await refresh();
     if (notify) {
-      alert('已从 Firebase 拉取并合并。');
+      alert('已从 Firebase 拉取，并用云端数据覆盖本地。');
     }
   } catch (error) {
     updateCloudSyncStatus('云端同步失败');
