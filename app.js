@@ -2746,13 +2746,6 @@ function createGoogleProvider() {
   return provider;
 }
 
-function shouldUseRedirectForGoogleSignIn() {
-  const userAgent = navigator.userAgent || '';
-  const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(userAgent);
-  const isStandalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone;
-  return isMobileDevice || isStandalone;
-}
-
 async function resolveFirebaseRedirectResult() {
   if (firebaseRedirectHandled || !firebaseAuth) return;
   firebaseRedirectHandled = true;
@@ -2938,11 +2931,6 @@ async function signInWithGoogle() {
     saveFirebaseConfigText($('#firebaseConfigInput').value || firebaseConfigText);
     await ensureFirebaseReady();
     const provider = createGoogleProvider();
-
-    if (shouldUseRedirectForGoogleSignIn()) {
-      await firebaseAuth.signInWithRedirect(provider);
-      return;
-    }
 
     const result = await firebaseAuth.signInWithPopup(provider);
     firebaseUser = result.user || firebaseAuth.currentUser || null;
