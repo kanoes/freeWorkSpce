@@ -2071,10 +2071,67 @@ function applyManualType(index, manualType) {
   renderDaySheetTrades();
 }
 
+function captureDaySheetRenderState() {
+  const active = document.activeElement;
+  const detailsState = $$('#tradeEditorList .trade-advanced').map((details) => ({
+    index: details.closest('[data-index]')?.dataset.index || '',
+    open: details.open
+  }));
+
+  if (!active || !active.closest('#tradeEditorList')) {
+    return { focus: null, detailsState };
+  }
+
+  const field = active.dataset?.field;
+  const index = active.dataset?.index;
+  if (!field || index == null) {
+    return { focus: null, detailsState };
+  }
+
+  const focus = {
+    field,
+    index,
+    tagName: active.tagName,
+    selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+    selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
+  };
+
+  return { focus, detailsState };
+}
+
+function restoreDaySheetRenderState(renderState) {
+  if (!renderState) return;
+
+  renderState.detailsState?.forEach((item) => {
+    if (!item?.open) return;
+    const details = document.querySelector(`#tradeEditorList [data-index="${item.index}"] .trade-advanced`);
+    if (details) details.open = true;
+  });
+
+  const focus = renderState.focus;
+  if (!focus) return;
+
+  const selector = `#tradeEditorList [data-index="${focus.index}"][data-field="${focus.field}"]`;
+  const next = document.querySelector(selector);
+  if (!next) return;
+
+  next.focus({ preventScroll: true });
+  if (
+    typeof focus.selectionStart === 'number'
+    && typeof focus.selectionEnd === 'number'
+    && typeof next.setSelectionRange === 'function'
+  ) {
+    try {
+      next.setSelectionRange(focus.selectionStart, focus.selectionEnd);
+    } catch {}
+  }
+}
+
 function renderDaySheetTrades() {
   const container = $('#tradeEditorList');
   const date = $('#fDate').value || editingDay?.date || todayStr();
   const trades = getDaySheetRenderableTrades();
+  const renderState = captureDaySheetRenderState();
 
   container.innerHTML = trades.map((trade, index) => {
     const displayName = getStockDisplayName(trade.symbol, trade.name);
@@ -2232,6 +2289,7 @@ function renderDaySheetTrades() {
 
   updateDaySheetHint();
   updateDaySheetSummary();
+  restoreDaySheetRenderState(renderState);
 }
 
 function updateDaySheetHint() {
