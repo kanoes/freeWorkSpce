@@ -264,28 +264,57 @@ const DB_NAME = 'tradediary_db';
 const DB_VERSION = 4;
 const STORE_NAME = 'days';
 
-function openDB() {
+function attachDbUpgradeHandler(request) {
+  request.onupgradeneeded = (event) => {
+    const db = event.target.result;
+    if (!db.objectStoreNames.contains(STORE_NAME)) {
+      const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      store.createIndex('date', 'date', { unique: true });
+      return;
+    }
+
+    const transaction = event.target.transaction;
+    const store = transaction.objectStore(STORE_NAME);
+    if (!store.indexNames.contains('date')) {
+      store.createIndex('date', 'date', { unique: true });
+    }
+  };
+}
+
+function openDBWithVersion(version) {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = (event) => {
-      const db = event.target.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-        store.createIndex('date', 'date', { unique: true });
-        return;
-      }
-
-      const transaction = event.target.transaction;
-      const store = transaction.objectStore(STORE_NAME);
-      if (!store.indexNames.contains('date')) {
-        store.createIndex('date', 'date', { unique: true });
-      }
-    };
+    const request = version ? indexedDB.open(DB_NAME, version) : indexedDB.open(DB_NAME);
+    attachDbUpgradeHandler(request);
 
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+async function getExistingDbVersion() {
+  if (typeof indexedDB.databases !== 'function') return null;
+
+  try {
+    const databases = await indexedDB.databases();
+    const matched = databases.find((item) => item.name === DB_NAME);
+    return Number.isFinite(matched?.version) ? matched.version : null;
+  } catch {
+    return null;
+  }
+}
+
+async function openDB() {
+  const existingVersion = await getExistingDbVersion();
+  const targetVersion = existingVersion ? Math.max(DB_VERSION, existingVersion) : DB_VERSION;
+
+  try {
+    return await openDBWithVersion(targetVersion);
+  } catch (error) {
+    if (error?.name === 'VersionError') {
+      return openDBWithVersion();
+    }
+    throw error;
+  }
 }
 
 async function getAllDays() {
@@ -1504,7 +1533,7 @@ function renderRecords() {
   if (!days.length) {
     container.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">空</div>
+        <div class="empty-icon">🍪</div>
         <div class="empty-title">这个范围还没有记录</div>
         <div class="empty-desc">切换到其他视角，或者先录入 / 上传交易。</div>
       </div>
@@ -1568,7 +1597,7 @@ function renderAnalysisPage() {
   if (!summary.positions.length) {
     positionsList.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">仓</div>
+        <div class="empty-icon">📦</div>
         <div class="empty-title">当前没有在仓标的</div>
       </div>
     `;
@@ -1599,7 +1628,7 @@ function renderAnalysisPage() {
   if (!summary.ranking.length) {
     rankingList.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">榜</div>
+        <div class="empty-icon">🏅</div>
         <div class="empty-title">还没有已实现盈亏</div>
       </div>
     `;
@@ -1656,7 +1685,7 @@ function renderDividendPage() {
   if (!summary.dividendHistory.length) {
     historyContainer.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">¥</div>
+        <div class="empty-icon">🎀</div>
         <div class="empty-title">还没有分红历史</div>
       </div>
     `;

@@ -1,5 +1,5 @@
 /* 甜饼工坊 Service Worker */
-const CACHE_NAME = 'cookie-workshop-v3.4';
+const CACHE_NAME = 'cookie-workshop-v4.1';
 const ASSETS = [
   './',
   './index.html',
@@ -52,22 +52,15 @@ self.addEventListener('fetch', (event) => {
   }
   
   event.respondWith(
-    caches.match(request)
-      .then((cached) => {
-        // Return cached version or fetch from network
-        const fetchPromise = fetch(request)
-          .then((response) => {
-            // Cache the new response
-            if (response.ok) {
-              const clone = response.clone();
-              caches.open(CACHE_NAME)
-                .then((cache) => cache.put(request, clone));
-            }
-            return response;
-          })
-          .catch(() => cached);
-        
-        return cached || fetchPromise;
+    fetch(request)
+      .then((response) => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME)
+            .then((cache) => cache.put(request, clone));
+        }
+        return response;
       })
+      .catch(() => caches.match(request))
   );
 });

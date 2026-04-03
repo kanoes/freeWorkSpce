@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#11223d" />
+  <meta name="theme-color" content="#7a4d2d" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>甜饼工坊 · 交易仪表盘</title>
@@ -25,10 +25,13 @@
 
   <div class="app-page" id="mainPage">
     <header class="hero-header">
-      <div class="hero-copy">
-        <div class="hero-kicker">Trade Journal 4.0</div>
-        <h1>甜饼工坊</h1>
-        <p>云同步、CSV 智能覆盖、现物/信用分开看，也能合计看。</p>
+      <div class="hero-brand">
+        <div class="hero-mascot">🍪</div>
+        <div class="hero-copy">
+          <div class="hero-kicker">甜饼工坊 4.0</div>
+          <h1>甜饼工坊</h1>
+          <p>云同步、CSV 智能覆盖，还是那个暖暖的交易小账本。</p>
+        </div>
       </div>
       <button class="icon-btn" id="btnSettings" aria-label="打开设置">
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
@@ -45,8 +48,8 @@
     <section class="scope-card">
       <div class="scope-head">
         <div>
-          <div class="section-kicker">Dashboard Scope</div>
-          <h2>仪表盘视角</h2>
+          <div class="section-kicker">主看板</div>
+          <h2>今天想看哪一类账本</h2>
         </div>
         <div class="scope-caption" id="dashboardScopeCaption">当前查看合计数据</div>
       </div>
@@ -59,7 +62,7 @@
 
     <section class="summary-grid">
       <article class="summary-card hero">
-        <span class="summary-label">总收益</span>
+        <span class="summary-label">小金库收益</span>
         <strong class="summary-value" id="summaryProfit">¥0</strong>
         <span class="summary-note" id="summaryProfitNote">已实现损益</span>
       </article>
@@ -83,8 +86,8 @@
     <section class="card">
       <div class="card-header chart-card-header">
         <div>
-          <div class="section-kicker">Trend</div>
-          <h2>收益曲线</h2>
+          <div class="section-kicker">收益趋势</div>
+          <h2>今天的甜度走势</h2>
         </div>
         <div class="chart-controls">
           <div class="mini-toggle" id="chartRangeToggle">
@@ -105,19 +108,19 @@
 
     <section class="action-grid">
       <button class="action-btn primary" id="btnAddDay">
-        <span class="action-icon">＋</span>
+        <span class="action-icon">📝</span>
         <span>手动录入</span>
       </button>
       <button class="action-btn accent" id="btnUploadCsv">
-        <span class="action-icon">CSV</span>
+        <span class="action-icon">📂</span>
         <span>上传 CSV</span>
       </button>
       <button class="action-btn" id="btnDividend">
-        <span class="action-icon">¥</span>
+        <span class="action-icon">🎁</span>
         <span>分红</span>
       </button>
       <button class="action-btn" id="btnAnalysis">
-        <span class="action-icon">图</span>
+        <span class="action-icon">📊</span>
         <span>分析</span>
       </button>
     </section>
@@ -125,7 +128,7 @@
     <section class="card">
       <div class="card-header">
         <div>
-          <div class="section-kicker">Records</div>
+          <div class="section-kicker">每日账本</div>
           <h2>交易记录</h2>
         </div>
         <div class="filter-stack">
@@ -137,7 +140,7 @@
       </div>
       <div class="records-list" id="recordsList">
         <div class="empty-state">
-          <div class="empty-icon">﹢</div>
+          <div class="empty-icon">🍪</div>
           <div class="empty-title">还没有交易记录</div>
           <div class="empty-desc">先手动录入一笔，或者直接上传券商 CSV。</div>
         </div>
@@ -149,8 +152,8 @@
     <header class="sub-header">
       <button class="back-btn" id="btnBackFromAnalysis">返回</button>
       <div>
-        <div class="section-kicker">Deep Dive</div>
-        <h1>分析看板</h1>
+        <div class="section-kicker">深入看看</div>
+        <h1>分析小看板</h1>
       </div>
       <div class="sub-header-spacer"></div>
     </header>
@@ -158,7 +161,7 @@
     <section class="scope-card compact">
       <div class="scope-head">
         <div>
-          <div class="section-kicker">Analysis Scope</div>
+          <div class="section-kicker">分析维度</div>
           <h2>分析维度</h2>
         </div>
         <div class="scope-caption" id="analysisScopeCaption">当前查看合计数据</div>
@@ -192,13 +195,13 @@
     <section class="card">
       <div class="card-header">
         <div>
-          <div class="section-kicker">Open Positions</div>
+          <div class="section-kicker">当前在仓</div>
           <h2>当前在仓</h2>
         </div>
       </div>
       <div class="stack-list" id="positionsList">
         <div class="empty-state">
-          <div class="empty-icon">仓</div>
+          <div class="empty-icon">📦</div>
           <div class="empty-title">当前没有在仓标的</div>
         </div>
       </div>
@@ -207,13 +210,13 @@
     <section class="card">
       <div class="card-header">
         <div>
-          <div class="section-kicker">Ranking</div>
+          <div class="section-kicker">盈亏排行</div>
           <h2>股票盈亏排行</h2>
         </div>
       </div>
       <div class="stack-list" id="stockRankingList">
         <div class="empty-state">
-          <div class="empty-icon">榜</div>
+          <div class="empty-icon">🏅</div>
           <div class="empty-title">还没有已实现盈亏</div>
         </div>
       </div>
@@ -222,7 +225,7 @@
     <section class="card">
       <div class="card-header">
         <div>
-          <div class="section-kicker">Trading Activity</div>
+          <div class="section-kicker">交易频率</div>
           <h2>交易频率</h2>
         </div>
       </div>
@@ -249,7 +252,7 @@
     <section class="card">
       <div class="card-header">
         <div>
-          <div class="section-kicker">Monthly</div>
+          <div class="section-kicker">月度收益</div>
           <h2>月度收益</h2>
         </div>
       </div>
@@ -263,8 +266,8 @@
     <header class="sub-header">
       <button class="back-btn" id="btnBackFromDividend">返回</button>
       <div>
-        <div class="section-kicker">Dividend</div>
-        <h1>分红看板</h1>
+        <div class="section-kicker">甜饼分红</div>
+        <h1>分红小看板</h1>
       </div>
       <div class="sub-header-spacer"></div>
     </header>
@@ -276,7 +279,7 @@
     <section class="scope-card compact">
       <div class="scope-head">
         <div>
-          <div class="section-kicker">Dividend Scope</div>
+          <div class="section-kicker">分红范围</div>
           <h2>查看范围</h2>
         </div>
         <div class="scope-caption" id="dividendScopeCaption">当前查看合计数据</div>
@@ -291,7 +294,7 @@
     <section class="card">
       <div class="card-header">
         <div>
-          <div class="section-kicker">Ratio</div>
+          <div class="section-kicker">分红比例</div>
           <h2>分红比例</h2>
         </div>
       </div>
@@ -347,7 +350,7 @@
     <section class="card">
       <div class="card-header">
         <div>
-          <div class="section-kicker">Summary</div>
+          <div class="section-kicker">分红汇总</div>
           <h2>分红汇总（2026年度起）</h2>
         </div>
       </div>
@@ -370,13 +373,13 @@
     <section class="card">
       <div class="card-header">
         <div>
-          <div class="section-kicker">History</div>
+          <div class="section-kicker">分红历史</div>
           <h2>分红历史（2026年度起）</h2>
         </div>
       </div>
       <div class="stack-list" id="dividendHistory">
         <div class="empty-state">
-          <div class="empty-icon">¥</div>
+          <div class="empty-icon">🎀</div>
           <div class="empty-title">还没有分红历史</div>
         </div>
       </div>
@@ -388,7 +391,7 @@
     <div class="sheet-panel tall">
       <div class="sheet-header">
         <div>
-          <div class="section-kicker">Manual Entry</div>
+          <div class="section-kicker">手动录入</div>
           <h2 id="daySheetTitle">手动录入</h2>
           <p id="daySheetSubtitle">录入时会自动套用当前对应账户的分红比例。</p>
         </div>
@@ -423,7 +426,7 @@
     <div class="sheet-panel">
       <div class="sheet-header">
         <div>
-          <div class="section-kicker">Settings</div>
+          <div class="section-kicker">小工坊设置</div>
           <h2>设置</h2>
           <p>保留云同步和 CSV 上传，移除旧的 JSON 导入导出。</p>
         </div>

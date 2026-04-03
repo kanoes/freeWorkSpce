@@ -1,30 +1,30 @@
 :root {
-  --bg: #081224;
-  --bg-soft: rgba(10, 21, 42, 0.72);
-  --bg-card: rgba(10, 19, 37, 0.78);
-  --bg-card-strong: rgba(15, 29, 52, 0.92);
-  --bg-panel: rgba(7, 15, 29, 0.96);
-  --bg-input: rgba(255, 255, 255, 0.06);
-  --line: rgba(143, 178, 255, 0.18);
-  --line-strong: rgba(143, 178, 255, 0.28);
-  --text: #ecf5ff;
-  --text-dim: rgba(236, 245, 255, 0.72);
-  --text-faint: rgba(236, 245, 255, 0.48);
-  --accent: #4ecdc4;
-  --accent-strong: #19b9ae;
-  --accent-warm: #ffb44d;
-  --accent-cash: #5ca9ff;
-  --accent-margin: #ff9f4d;
+  --bg: #20140f;
+  --bg-soft: rgba(47, 31, 23, 0.72);
+  --bg-card: rgba(43, 29, 22, 0.8);
+  --bg-card-strong: rgba(60, 39, 28, 0.92);
+  --bg-panel: rgba(35, 23, 17, 0.96);
+  --bg-input: rgba(255, 248, 239, 0.07);
+  --line: rgba(255, 208, 160, 0.16);
+  --line-strong: rgba(255, 208, 160, 0.28);
+  --text: #fff6ec;
+  --text-dim: rgba(255, 246, 236, 0.74);
+  --text-faint: rgba(255, 246, 236, 0.5);
+  --accent: #f3a84c;
+  --accent-strong: #d97a2b;
+  --accent-warm: #ffcd7d;
+  --accent-cash: #7fb6ff;
+  --accent-margin: #ff9d77;
   --positive: #34d399;
   --negative: #fb7185;
-  --neutral: #9fb7d6;
+  --neutral: #d7c1ab;
   --shadow-lg: 0 28px 80px rgba(0, 0, 0, 0.42);
-  --shadow-md: 0 12px 36px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 12px 36px rgba(0, 0, 0, 0.26);
   --radius-xl: 28px;
   --radius-lg: 22px;
   --radius-md: 18px;
   --radius-sm: 14px;
-  --font-sans: "Avenir Next", "SF Pro Display", "Hiragino Sans GB", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-sans: "SF Pro Rounded", "Hiragino Maru Gothic ProN", "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
   --safe-top: env(safe-area-inset-top);
   --safe-bottom: env(safe-area-inset-bottom);
   --safe-left: env(safe-area-inset-left);
@@ -33,19 +33,19 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #eef5ff;
-    --bg-soft: rgba(255, 255, 255, 0.74);
-    --bg-card: rgba(255, 255, 255, 0.82);
-    --bg-card-strong: rgba(255, 255, 255, 0.95);
-    --bg-panel: rgba(243, 248, 255, 0.97);
-    --bg-input: rgba(10, 28, 56, 0.05);
-    --line: rgba(27, 67, 128, 0.12);
-    --line-strong: rgba(27, 67, 128, 0.2);
-    --text: #11223d;
-    --text-dim: rgba(17, 34, 61, 0.72);
-    --text-faint: rgba(17, 34, 61, 0.48);
-    --shadow-lg: 0 24px 60px rgba(34, 73, 126, 0.16);
-    --shadow-md: 0 14px 32px rgba(34, 73, 126, 0.12);
+    --bg: #fff4ea;
+    --bg-soft: rgba(255, 255, 255, 0.78);
+    --bg-card: rgba(255, 255, 255, 0.86);
+    --bg-card-strong: rgba(255, 255, 255, 0.96);
+    --bg-panel: rgba(255, 248, 241, 0.97);
+    --bg-input: rgba(122, 77, 45, 0.05);
+    --line: rgba(164, 103, 57, 0.14);
+    --line-strong: rgba(164, 103, 57, 0.24);
+    --text: #53311d;
+    --text-dim: rgba(83, 49, 29, 0.72);
+    --text-faint: rgba(83, 49, 29, 0.48);
+    --shadow-lg: 0 24px 60px rgba(164, 103, 57, 0.18);
+    --shadow-md: 0 14px 32px rgba(164, 103, 57, 0.12);
   }
 }
 
@@ -65,9 +65,9 @@ body {
   font-family: var(--font-sans);
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(78, 205, 196, 0.18), transparent 32%),
-    radial-gradient(circle at top right, rgba(255, 180, 77, 0.18), transparent 28%),
-    linear-gradient(180deg, #0b1830 0%, #081224 48%, #07111f 100%);
+    radial-gradient(circle at top left, rgba(255, 205, 125, 0.22), transparent 30%),
+    radial-gradient(circle at top right, rgba(255, 160, 122, 0.18), transparent 28%),
+    linear-gradient(180deg, #2b1a12 0%, #20140f 48%, #180f0b 100%);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
@@ -92,7 +92,7 @@ body {
   height: 280px;
   top: -80px;
   left: -90px;
-  background: radial-gradient(circle, rgba(78, 205, 196, 0.42), transparent 70%);
+  background: radial-gradient(circle, rgba(255, 205, 125, 0.42), transparent 70%);
 }
 
 .orb-b {
@@ -100,16 +100,16 @@ body {
   height: 320px;
   top: 120px;
   right: -120px;
-  background: radial-gradient(circle, rgba(255, 180, 77, 0.34), transparent 72%);
+  background: radial-gradient(circle, rgba(255, 160, 122, 0.34), transparent 72%);
 }
 
 .bg-grid {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 28px 28px;
+    radial-gradient(circle at 10px 10px, rgba(255, 245, 232, 0.06) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 24px 24px, rgba(255, 205, 125, 0.06) 0 1.6px, transparent 2px);
+  background-size: 34px 34px;
   mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 92%);
 }
 
@@ -172,6 +172,33 @@ textarea {
   margin-bottom: 18px;
 }
 
+.hero-header {
+  padding: 18px;
+  border-radius: 30px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 205, 125, 0.18), transparent 54%),
+    linear-gradient(145deg, rgba(89, 54, 34, 0.88), rgba(50, 31, 23, 0.92));
+  border: 1px solid rgba(255, 208, 160, 0.18);
+  box-shadow: var(--shadow-md);
+}
+
+.hero-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.hero-mascot {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 22px;
+  font-size: 32px;
+  background: radial-gradient(circle at top left, #ffd58f, #f3a84c 68%);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
 .hero-copy h1,
 .sub-header h1,
 .sheet-header h2,
@@ -203,8 +230,7 @@ textarea {
 .hero-kicker,
 .section-kicker {
   font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.14em;
   margin-bottom: 6px;
 }
 
@@ -247,8 +273,8 @@ textarea {
   display: grid;
   place-items: center;
   border-radius: 18px;
-  background: var(--bg-soft);
-  border: 1px solid var(--line);
+  background: rgba(255, 248, 239, 0.08);
+  border: 1px solid rgba(255, 208, 160, 0.22);
   box-shadow: var(--shadow-md);
 }
 
@@ -268,8 +294,8 @@ textarea {
 .status-pill {
   padding: 9px 14px;
   border-radius: 999px;
-  border: 1px solid rgba(78, 205, 196, 0.24);
-  background: rgba(78, 205, 196, 0.11);
+  border: 1px solid rgba(255, 208, 160, 0.24);
+  background: rgba(255, 205, 125, 0.12);
   font-size: 12px;
   color: var(--text);
 }
@@ -361,10 +387,10 @@ textarea {
 .scope-btn.active,
 .mini-btn.active,
 .editor-chip.active {
-  background: linear-gradient(135deg, rgba(78, 205, 196, 0.24), rgba(78, 205, 196, 0.08));
-  border-color: rgba(78, 205, 196, 0.44);
+  background: linear-gradient(135deg, rgba(255, 205, 125, 0.22), rgba(243, 168, 76, 0.1));
+  border-color: rgba(255, 205, 125, 0.42);
   color: var(--text);
-  box-shadow: inset 0 0 0 1px rgba(78, 205, 196, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 205, 125, 0.16);
 }
 
 .summary-grid {
@@ -384,8 +410,8 @@ textarea {
 
 .summary-card.hero {
   background:
-    radial-gradient(circle at top left, rgba(78, 205, 196, 0.2), transparent 58%),
-    linear-gradient(145deg, rgba(92, 169, 255, 0.16), rgba(10, 19, 37, 0.7));
+    radial-gradient(circle at top left, rgba(255, 221, 156, 0.22), transparent 58%),
+    linear-gradient(145deg, rgba(243, 168, 76, 0.22), rgba(86, 53, 36, 0.78));
 }
 
 .summary-label {
@@ -455,18 +481,18 @@ textarea {
 
 .action-btn.primary {
   background:
-    linear-gradient(135deg, rgba(92, 169, 255, 0.24), rgba(25, 185, 174, 0.12)),
+    linear-gradient(135deg, rgba(255, 205, 125, 0.24), rgba(255, 157, 119, 0.12)),
     var(--bg-card-strong);
 }
 
 .action-btn.accent {
   background:
-    linear-gradient(135deg, rgba(255, 180, 77, 0.24), rgba(255, 159, 77, 0.12)),
+    linear-gradient(135deg, rgba(255, 184, 77, 0.26), rgba(255, 205, 125, 0.12)),
     var(--bg-card-strong);
 }
 
 .action-icon {
-  font-size: 18px;
+  font-size: 22px;
   color: var(--text);
 }
 
@@ -498,8 +524,8 @@ textarea {
 .form-select:focus,
 .filter-select:focus,
 textarea:focus {
-  border-color: rgba(78, 205, 196, 0.56);
-  box-shadow: 0 0 0 4px rgba(78, 205, 196, 0.14);
+  border-color: rgba(255, 205, 125, 0.56);
+  box-shadow: 0 0 0 4px rgba(255, 205, 125, 0.14);
 }
 
 .records-list,
@@ -739,8 +765,8 @@ textarea:focus {
 }
 
 .ratio-editor {
-  border: 1px solid rgba(78, 205, 196, 0.28);
-  background: rgba(78, 205, 196, 0.08);
+  border: 1px solid rgba(255, 205, 125, 0.28);
+  background: rgba(255, 205, 125, 0.08);
   border-radius: 22px;
   padding: 16px;
 }
@@ -788,13 +814,13 @@ textarea:focus {
 }
 
 .primary-btn {
-  background: linear-gradient(135deg, rgba(78, 205, 196, 0.9), rgba(25, 185, 174, 0.9));
-  color: #06213a;
+  background: linear-gradient(135deg, rgba(255, 205, 125, 0.96), rgba(243, 168, 76, 0.94));
+  color: #4f2f1d;
   border-color: transparent;
 }
 
 .secondary-btn {
-  background: linear-gradient(135deg, rgba(92, 169, 255, 0.16), rgba(92, 169, 255, 0.08));
+  background: linear-gradient(135deg, rgba(255, 205, 125, 0.14), rgba(255, 157, 119, 0.08));
 }
 
 .ghost-btn,
@@ -824,7 +850,7 @@ textarea:focus {
   height: 44px;
   margin-bottom: 12px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 205, 125, 0.14);
   font-weight: 800;
 }
 
@@ -918,8 +944,8 @@ textarea:focus {
 }
 
 .trade-display-card.locked {
-  border-color: rgba(78, 205, 196, 0.28);
-  background: rgba(78, 205, 196, 0.08);
+  border-color: rgba(255, 205, 125, 0.28);
+  background: rgba(255, 205, 125, 0.08);
 }
 
 .editor-card-top {
