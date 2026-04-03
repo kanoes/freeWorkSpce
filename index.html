@@ -3,643 +3,473 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0a0f1a" />
+  <meta name="theme-color" content="#11223d" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>甜饼工坊 · 交易日记</title>
+  <title>甜饼工坊 · 交易仪表盘</title>
 
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="styles.css" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  
-  <!-- Chart.js for beautiful charts -->
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
-
 <body>
-  <div class="app" id="mainPage">
-    <!-- Header -->
-    <header class="header">
-      <div class="header-content">
-        <div class="logo-section">
-          <div class="logo">🍪</div>
-          <div class="title-group">
-            <h1>甜饼工坊</h1>
-            <p>每日交易记录</p>
-          </div>
-        </div>
-        <button class="icon-btn" id="btnSettings" aria-label="设置">
-          <svg viewBox="0 0 24 24" width="22" height="22">
-            <path fill="currentColor" d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.64-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.25-.09-.52 0-.64.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.64.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.25.08.52 0 .64-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z"/>
-          </svg>
-        </button>
+  <div class="bg-layer">
+    <div class="bg-orb orb-a"></div>
+    <div class="bg-orb orb-b"></div>
+    <div class="bg-grid"></div>
+  </div>
+
+  <input type="file" id="csvFileInput" accept=".csv,text/csv" hidden />
+
+  <div class="app-page" id="mainPage">
+    <header class="hero-header">
+      <div class="hero-copy">
+        <div class="hero-kicker">Trade Journal 4.0</div>
+        <h1>甜饼工坊</h1>
+        <p>云同步、CSV 智能覆盖、现物/信用分开看，也能合计看。</p>
       </div>
+      <button class="icon-btn" id="btnSettings" aria-label="打开设置">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path fill="currentColor" d="M12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7m7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.64-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.5.5 0 0 0 14 2h-4a.5.5 0 0 0-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.25-.09-.52 0-.64.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.64.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.25.08.52 0 .64-.22l2-3.46c.12-.22.07-.49-.12-.64z"/>
+        </svg>
+      </button>
     </header>
 
-    <!-- Main Content -->
-    <main class="main">
-      <!-- Summary Cards -->
-      <section class="summary-section">
-        <div class="summary-card">
-          <div class="summary-icon">💰</div>
-          <div class="summary-info">
-            <span class="summary-label">总收益</span>
-            <span class="summary-value" id="totalProfit">¥0</span>
-          </div>
-        </div>
-        <div class="summary-card">
-          <div class="summary-icon">📊</div>
-          <div class="summary-info">
-            <span class="summary-label">交易天数</span>
-            <span class="summary-value" id="tradeDays">0天</span>
-          </div>
-        </div>
-        <div class="summary-card">
-          <div class="summary-icon">🎯</div>
-          <div class="summary-info">
-            <span class="summary-label">胜率</span>
-            <span class="summary-value" id="winRate">0%</span>
-          </div>
-        </div>
-      </section>
+    <section class="status-strip">
+      <div class="status-pill" id="syncMiniStatus">云端尚未同步</div>
+      <div class="status-pill subtle" id="csvImportStatus">还没有导入 CSV</div>
+    </section>
 
-      <!-- Chart Section -->
-      <section class="card chart-card">
-        <div class="card-header chart-header">
-          <h2>收益趋势</h2>
-          <div class="chart-tabs-row">
-            <div class="chart-tabs">
-              <button class="chart-tab active" data-range="week">周</button>
-              <button class="chart-tab" data-range="month">月</button>
-              <button class="chart-tab" data-range="all">全部</button>
-            </div>
-            <div class="chart-tabs chart-tabs-type">
-              <button class="chart-tab active" data-type="cumulative">累计</button>
-              <button class="chart-tab" data-type="daily">每日</button>
-            </div>
-          </div>
+    <section class="scope-card">
+      <div class="scope-head">
+        <div>
+          <div class="section-kicker">Dashboard Scope</div>
+          <h2>仪表盘视角</h2>
         </div>
-        <div class="chart-container">
-          <canvas id="profitChart"></canvas>
-        </div>
-      </section>
-
-      <!-- Action Buttons -->
-      <div class="action-buttons four-cols">
-        <button class="add-day-btn compact" id="btnAddDay">
-          <span class="add-icon">+</span>
-          <span>添加记录</span>
-        </button>
-        <button class="feature-btn" id="btnDividend">
-          <span class="feature-icon">🎁</span>
-          <span>股东分红</span>
-        </button>
-        <button class="feature-btn" id="btnAnalysis">
-          <span class="feature-icon">📊</span>
-          <span>数据分析</span>
-        </button>
-        <button class="feature-btn ai-btn" id="btnAIAssistant">
-          <span class="feature-icon">💬</span>
-          <span>AI助手</span>
-        </button>
+        <div class="scope-caption" id="dashboardScopeCaption">当前查看合计数据</div>
       </div>
+      <div class="scope-toggle" id="dashboardScopeToggle">
+        <button class="scope-btn active" data-owner="dashboard" data-scope="all">合计</button>
+        <button class="scope-btn" data-owner="dashboard" data-scope="cash">现物</button>
+        <button class="scope-btn" data-owner="dashboard" data-scope="margin">信用</button>
+      </div>
+    </section>
 
-      <!-- Records List -->
-      <section class="card records-card">
-        <div class="card-header">
+    <section class="summary-grid">
+      <article class="summary-card hero">
+        <span class="summary-label">总收益</span>
+        <strong class="summary-value" id="summaryProfit">¥0</strong>
+        <span class="summary-note" id="summaryProfitNote">已实现损益</span>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">交易天数</span>
+        <strong class="summary-value" id="summaryTradeDays">0</strong>
+        <span class="summary-note">有交易的日期</span>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">胜率</span>
+        <strong class="summary-value" id="summaryWinRate">0%</strong>
+        <span class="summary-note">按交易日统计</span>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">在仓标的</span>
+        <strong class="summary-value" id="summaryOpenPositions">0</strong>
+        <span class="summary-note">当前未平仓/未卖完</span>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-header chart-card-header">
+        <div>
+          <div class="section-kicker">Trend</div>
+          <h2>收益曲线</h2>
+        </div>
+        <div class="chart-controls">
+          <div class="mini-toggle" id="chartRangeToggle">
+            <button class="mini-btn active" data-range="week">近7天</button>
+            <button class="mini-btn" data-range="month">近30天</button>
+            <button class="mini-btn" data-range="all">全部</button>
+          </div>
+          <div class="mini-toggle" id="chartTypeToggle">
+            <button class="mini-btn active" data-type="cumulative">累计</button>
+            <button class="mini-btn" data-type="daily">每日</button>
+          </div>
+        </div>
+      </div>
+      <div class="chart-box">
+        <canvas id="profitChart"></canvas>
+      </div>
+    </section>
+
+    <section class="action-grid">
+      <button class="action-btn primary" id="btnAddDay">
+        <span class="action-icon">＋</span>
+        <span>手动录入</span>
+      </button>
+      <button class="action-btn accent" id="btnUploadCsv">
+        <span class="action-icon">CSV</span>
+        <span>上传 CSV</span>
+      </button>
+      <button class="action-btn" id="btnDividend">
+        <span class="action-icon">¥</span>
+        <span>分红</span>
+      </button>
+      <button class="action-btn" id="btnAnalysis">
+        <span class="action-icon">图</span>
+        <span>分析</span>
+      </button>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <div class="section-kicker">Records</div>
           <h2>交易记录</h2>
-          <div class="filter-group">
-            <select id="monthFilter" class="month-select">
-              <option value="all">全部</option>
-            </select>
-          </div>
         </div>
-        <div class="records-container">
-          <div class="records-list" id="recordsList">
-            <div class="empty-state" id="emptyState">
-              <div class="empty-icon">📝</div>
-              <div class="empty-title">还没有记录</div>
-              <div class="empty-desc">点击上方按钮开始记录你的第一天</div>
-            </div>
-          </div>
-          <div class="records-pagination" id="recordsPagination" hidden>
-            <button class="pagination-btn" id="btnPrevPage" disabled>‹ 上一页</button>
-            <span class="pagination-info" id="paginationInfo">1 / 1</span>
-            <button class="pagination-btn" id="btnNextPage" disabled>下一页 ›</button>
-          </div>
+        <div class="filter-stack">
+          <label class="filter-label" for="monthFilter">月份</label>
+          <select id="monthFilter" class="filter-select">
+            <option value="all">全部</option>
+          </select>
         </div>
-      </section>
-    </main>
+      </div>
+      <div class="records-list" id="recordsList">
+        <div class="empty-state">
+          <div class="empty-icon">﹢</div>
+          <div class="empty-title">还没有交易记录</div>
+          <div class="empty-desc">先手动录入一笔，或者直接上传券商 CSV。</div>
+        </div>
+      </div>
+    </section>
   </div>
 
-  <!-- Analysis Page -->
-  <div class="app analysis-page" id="analysisPage" hidden>
-    <header class="header">
-      <div class="header-content">
-        <button class="back-btn" id="btnBackFromAnalysis">
-          <span>←</span>
-          <span>返回</span>
-        </button>
-        <div class="title-group center">
-          <h1>数据分析</h1>
-        </div>
-        <div class="header-spacer"></div>
+  <div class="app-page sub-page" id="analysisPage" hidden>
+    <header class="sub-header">
+      <button class="back-btn" id="btnBackFromAnalysis">返回</button>
+      <div>
+        <div class="section-kicker">Deep Dive</div>
+        <h1>分析看板</h1>
       </div>
+      <div class="sub-header-spacer"></div>
     </header>
 
-    <main class="main">
-      <!-- Analysis Summary -->
-      <section class="analysis-summary">
-        <div class="analysis-stat-card">
-          <div class="analysis-stat-icon profit">💹</div>
-          <div class="analysis-stat-info">
-            <span class="analysis-stat-label">总收益</span>
-            <span class="analysis-stat-value" id="analysisTotalProfit">¥0</span>
-          </div>
+    <section class="scope-card compact">
+      <div class="scope-head">
+        <div>
+          <div class="section-kicker">Analysis Scope</div>
+          <h2>分析维度</h2>
         </div>
-        <div class="analysis-stat-card">
-          <div class="analysis-stat-icon">📈</div>
-          <div class="analysis-stat-info">
-            <span class="analysis-stat-label">盈利天数</span>
-            <span class="analysis-stat-value" id="analysisWinDays">0</span>
-          </div>
-        </div>
-        <div class="analysis-stat-card">
-          <div class="analysis-stat-icon">📉</div>
-          <div class="analysis-stat-info">
-            <span class="analysis-stat-label">亏损天数</span>
-            <span class="analysis-stat-value" id="analysisLossDays">0</span>
-          </div>
-        </div>
-        <div class="analysis-stat-card">
-          <div class="analysis-stat-icon">🏷️</div>
-          <div class="analysis-stat-info">
-            <span class="analysis-stat-label">交易股票数</span>
-            <span class="analysis-stat-value" id="analysisStockCount">0</span>
-          </div>
-        </div>
-      </section>
+        <div class="scope-caption" id="analysisScopeCaption">当前查看合计数据</div>
+      </div>
+      <div class="scope-toggle" id="analysisScopeToggle">
+        <button class="scope-btn active" data-owner="analysis" data-scope="all">合计</button>
+        <button class="scope-btn" data-owner="analysis" data-scope="cash">现物</button>
+        <button class="scope-btn" data-owner="analysis" data-scope="margin">信用</button>
+      </div>
+    </section>
 
-      <!-- Current Holdings -->
-      <section class="card">
-        <div class="card-header">
-          <h2>📦 当前持仓</h2>
-        </div>
-        <div class="holdings-container">
-          <div class="holdings-list" id="holdingsList">
-            <div class="empty-state">
-              <div class="empty-icon">📦</div>
-              <div class="empty-title">暂无持仓</div>
-            </div>
-          </div>
-          <div class="list-pagination" id="holdingsPagination" hidden>
-            <button class="pagination-btn" id="btnHoldingsPrev" disabled>‹ 上一页</button>
-            <span class="pagination-info" id="holdingsPaginationInfo">1 / 1</span>
-            <button class="pagination-btn" id="btnHoldingsNext" disabled>下一页 ›</button>
-          </div>
-        </div>
-      </section>
+    <section class="summary-grid analysis-grid">
+      <article class="summary-card">
+        <span class="summary-label">总收益</span>
+        <strong class="summary-value" id="analysisTotalProfit">¥0</strong>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">盈利天数</span>
+        <strong class="summary-value" id="analysisWinDays">0</strong>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">亏损天数</span>
+        <strong class="summary-value" id="analysisLossDays">0</strong>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">交易标的</span>
+        <strong class="summary-value" id="analysisSymbolCount">0</strong>
+      </article>
+    </section>
 
-      <!-- Stock Ranking -->
-      <section class="card">
-        <div class="card-header">
-          <h2>📊 股票损益排行</h2>
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <div class="section-kicker">Open Positions</div>
+          <h2>当前在仓</h2>
         </div>
-        <div class="stock-ranking-container">
-          <div class="stock-ranking" id="stockRanking">
-            <div class="empty-state">
-              <div class="empty-icon">📈</div>
-              <div class="empty-title">暂无数据</div>
-              <div class="empty-desc">开始记录交易后这里会显示排行</div>
-            </div>
-          </div>
-          <div class="list-pagination" id="stockRankingPagination" hidden>
-            <button class="pagination-btn" id="btnStockRankingPrev" disabled>‹ 上一页</button>
-            <span class="pagination-info" id="stockRankingPaginationInfo">1 / 1</span>
-            <button class="pagination-btn" id="btnStockRankingNext" disabled>下一页 ›</button>
-          </div>
+      </div>
+      <div class="stack-list" id="positionsList">
+        <div class="empty-state">
+          <div class="empty-icon">仓</div>
+          <div class="empty-title">当前没有在仓标的</div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <!-- Trading Frequency -->
-      <section class="card">
-        <div class="card-header">
-          <h2>📈 交易频率</h2>
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <div class="section-kicker">Ranking</div>
+          <h2>股票盈亏排行</h2>
         </div>
-        <div class="trading-stats" id="tradingStats">
-          <div class="stat-row">
-            <span class="stat-label">总买入次数</span>
-            <span class="stat-value" id="totalBuyCount">0</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">总卖出次数</span>
-            <span class="stat-value" id="totalSellCount">0</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">平均每日交易</span>
-            <span class="stat-value" id="avgDailyTrades">0</span>
-          </div>
+      </div>
+      <div class="stack-list" id="stockRankingList">
+        <div class="empty-state">
+          <div class="empty-icon">榜</div>
+          <div class="empty-title">还没有已实现盈亏</div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <!-- Monthly Breakdown -->
-      <section class="card">
-        <div class="card-header">
-          <h2>📅 月度收益</h2>
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <div class="section-kicker">Trading Activity</div>
+          <h2>交易频率</h2>
         </div>
-        <div class="monthly-chart-container">
-          <canvas id="monthlyChart"></canvas>
+      </div>
+      <div class="stats-table">
+        <div class="stats-row">
+          <span>总交易笔数</span>
+          <strong id="analysisTradeCount">0</strong>
         </div>
-      </section>
+        <div class="stats-row">
+          <span>买入笔数</span>
+          <strong id="analysisBuyCount">0</strong>
+        </div>
+        <div class="stats-row">
+          <span>卖出笔数</span>
+          <strong id="analysisSellCount">0</strong>
+        </div>
+        <div class="stats-row">
+          <span>平均每日交易</span>
+          <strong id="analysisAvgTrades">0</strong>
+        </div>
+      </div>
+    </section>
 
-      <!-- Best/Worst Days -->
-      <section class="card">
-        <div class="card-header">
-          <h2>🏆 最佳 & 最差交易日</h2>
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <div class="section-kicker">Monthly</div>
+          <h2>月度收益</h2>
         </div>
-        <div class="best-worst-days" id="bestWorstDays">
-          <div class="empty-state">
-            <div class="empty-icon">📆</div>
-            <div class="empty-title">暂无数据</div>
-          </div>
-        </div>
-      </section>
-    </main>
+      </div>
+      <div class="chart-box monthly">
+        <canvas id="monthlyChart"></canvas>
+      </div>
+    </section>
   </div>
 
-  <!-- Dividend Page -->
-  <div class="app dividend-page" id="dividendPage" hidden>
-    <header class="header">
-      <div class="header-content">
-        <button class="back-btn" id="btnBackFromDividend">
-          <span>←</span>
-          <span>返回</span>
-        </button>
-        <div class="title-group center">
-          <h1>股东分红</h1>
-        </div>
-        <div class="header-spacer"></div>
+  <div class="app-page sub-page" id="dividendPage" hidden>
+    <header class="sub-header">
+      <button class="back-btn" id="btnBackFromDividend">返回</button>
+      <div>
+        <div class="section-kicker">Dividend</div>
+        <h1>分红看板</h1>
       </div>
+      <div class="sub-header-spacer"></div>
     </header>
 
-    <main class="main">
-      <!-- Dividend Ratio -->
-      <section class="card">
-        <div class="card-header">
-          <h2>📊 分红比例</h2>
-        </div>
-        <div class="dividend-ratio-setting">
-          <div class="ratio-input-group">
-            <input type="number" id="dividendNumerator" class="ratio-input" value="1" min="1" step="1" />
-            <span class="ratio-text">/</span>
-            <input type="number" id="dividendDenominator" class="ratio-input" value="3" min="1" step="1" />
-          </div>
-        </div>
-      </section>
+    <section class="notice-banner">
+      <strong>统计口径：</strong> 仅统计从 2026-04-01 起新增或平仓后产生的分红。
+    </section>
 
-      <!-- Today's Dividend -->
-      <section class="card">
-        <div class="card-header">
-          <h2>🎁 本日分红</h2>
+    <section class="scope-card compact">
+      <div class="scope-head">
+        <div>
+          <div class="section-kicker">Dividend Scope</div>
+          <h2>查看范围</h2>
         </div>
-        <div class="today-dividend" id="todayDividend">
-          <div class="dividend-empty">
-            <div class="empty-icon">📅</div>
-            <div class="empty-title">今日暂无交易记录</div>
-          </div>
-        </div>
-      </section>
+        <div class="scope-caption" id="dividendScopeCaption">当前查看合计数据</div>
+      </div>
+      <div class="scope-toggle" id="dividendScopeToggle">
+        <button class="scope-btn active" data-owner="dividend" data-scope="all">合计</button>
+        <button class="scope-btn" data-owner="dividend" data-scope="cash">现物</button>
+        <button class="scope-btn" data-owner="dividend" data-scope="margin">信用</button>
+      </div>
+    </section>
 
-      <!-- Week's Dividend -->
-      <section class="card">
-        <div class="card-header">
-          <h2>📆 本周分红</h2>
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <div class="section-kicker">Ratio</div>
+          <h2>分红比例</h2>
         </div>
-        <div class="today-dividend" id="weekDividend">
-          <div class="dividend-empty">
-            <div class="empty-icon">📅</div>
-            <div class="empty-title">本周暂无交易记录</div>
+      </div>
+      <div class="ratio-grid">
+        <article class="ratio-card">
+          <div class="ratio-card-top">
+            <span class="badge badge-cash">现物</span>
+            <strong class="ratio-value" id="cashRatioDisplay">1 / 3</strong>
           </div>
-        </div>
-      </section>
+          <p class="ratio-meta" id="cashRatioMeta">新交易会使用这个比例</p>
+          <button class="secondary-btn" id="btnEditCashRatio" data-ratio-target="cash">修改分红比例</button>
+        </article>
+        <article class="ratio-card">
+          <div class="ratio-card-top">
+            <span class="badge badge-margin">信用</span>
+            <strong class="ratio-value" id="marginRatioDisplay">1 / 3</strong>
+          </div>
+          <p class="ratio-meta" id="marginRatioMeta">新交易会使用这个比例</p>
+          <button class="secondary-btn" id="btnEditMarginRatio" data-ratio-target="margin">修改分红比例</button>
+        </article>
+      </div>
 
-      <!-- Dividend History -->
-      <section class="card">
-        <div class="card-header">
-          <h2>📜 分红历史</h2>
+      <div class="ratio-editor" id="ratioEditor" hidden>
+        <div class="ratio-editor-head">
+          <strong id="ratioEditorTitle">修改分红比例</strong>
+          <span id="ratioEditorHint">保存后仅影响后续新增交易</span>
         </div>
-        <div class="dividend-history" id="dividendHistory">
-          <div class="empty-state">
-            <div class="empty-icon">🎁</div>
-            <div class="empty-title">暂无分红记录</div>
-          </div>
+        <div class="ratio-input-row">
+          <input type="number" id="ratioNumeratorInput" class="form-input" min="1" step="1" inputmode="numeric" />
+          <span class="ratio-divider">/</span>
+          <input type="number" id="ratioDenominatorInput" class="form-input" min="1" step="1" inputmode="numeric" />
         </div>
-      </section>
+        <div class="ratio-editor-actions">
+          <button class="ghost-btn" type="button" id="btnCancelRatioEdit">取消</button>
+          <button class="primary-btn" type="button" id="btnSaveRatioEdit">保存比例</button>
+        </div>
+      </div>
+    </section>
 
-      <!-- Dividend Summary -->
-      <section class="card">
-        <div class="card-header">
-          <h2>📊 分红汇总</h2>
+    <section class="summary-grid dividend-grid">
+      <article class="summary-card">
+        <span class="summary-label">今日分红</span>
+        <strong class="summary-value" id="todayDividendAmount">¥0</strong>
+        <span class="summary-note" id="todayDividendNote">今天暂无数据</span>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">本周分红</span>
+        <strong class="summary-value" id="weekDividendAmount">¥0</strong>
+        <span class="summary-note" id="weekDividendNote">本周暂无数据</span>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <div class="section-kicker">Summary</div>
+          <h2>分红汇总（2026年度起）</h2>
         </div>
-        <div class="dividend-summary-stats">
-          <div class="dividend-stat">
-            <span class="dividend-stat-label">累计分红</span>
-            <span class="dividend-stat-value" id="totalDividend">¥0</span>
-          </div>
-          <div class="dividend-stat">
-            <span class="dividend-stat-label">累计分担亏损</span>
-            <span class="dividend-stat-value loss" id="totalLossShare">¥0</span>
-          </div>
-          <div class="dividend-stat highlight">
-            <span class="dividend-stat-label">净分红</span>
-            <span class="dividend-stat-value" id="netDividend">¥0</span>
-          </div>
+      </div>
+      <div class="stats-table">
+        <div class="stats-row">
+          <span>累计分红</span>
+          <strong id="totalDividend">¥0</strong>
         </div>
-      </section>
-    </main>
+        <div class="stats-row">
+          <span>累计分担亏损</span>
+          <strong id="totalLossShare">¥0</strong>
+        </div>
+        <div class="stats-row emphasis">
+          <span>净分红</span>
+          <strong id="netDividend">¥0</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <div class="section-kicker">History</div>
+          <h2>分红历史（2026年度起）</h2>
+        </div>
+      </div>
+      <div class="stack-list" id="dividendHistory">
+        <div class="empty-state">
+          <div class="empty-icon">¥</div>
+          <div class="empty-title">还没有分红历史</div>
+        </div>
+      </div>
+    </section>
   </div>
 
-  <!-- Add/Edit Day Sheet -->
   <div class="sheet" id="daySheet" aria-hidden="true">
     <div class="sheet-backdrop" id="daySheetBackdrop"></div>
-    <div class="sheet-panel">
+    <div class="sheet-panel tall">
       <div class="sheet-header">
         <div>
-          <h3 class="sheet-title" id="sheetTitle">添加记录</h3>
-          <p class="sheet-subtitle" id="sheetSubtitle">选择日期并输入交易明细</p>
+          <div class="section-kicker">Manual Entry</div>
+          <h2 id="daySheetTitle">手动录入</h2>
+          <p id="daySheetSubtitle">录入时会自动套用当前对应账户的分红比例。</p>
         </div>
-        <button class="icon-btn small" id="btnCloseSheet">✕</button>
+        <button class="icon-btn small" id="btnCloseDaySheet" aria-label="关闭">✕</button>
       </div>
 
       <form id="dayForm" class="day-form">
-        <!-- Date Selection -->
-        <div class="form-group">
-          <label class="form-label">日期</label>
-          <input type="date" id="fDate" class="form-input date-input" />
+        <div class="form-block">
+          <label class="form-label" for="fDate">日期</label>
+          <input type="date" id="fDate" class="form-input" />
+          <p class="inline-help" id="dayExistingHint">保存时若该日期已存在，会把新手动交易合并进去。</p>
         </div>
 
+        <div class="day-sheet-summary" id="daySheetSummary">当日已实现损益：¥0</div>
 
-        <!-- Trades Section -->
-        <div class="trades-section" id="tradesSection" hidden>
-          <div class="form-group">
-            <label class="form-label">交易明细</label>
-            <div class="trades-list-form" id="tradesListForm">
-              <!-- Trade entries will be added here -->
-            </div>
-            <button type="button" class="add-trade-btn" id="btnAddTrade">
-              <span>+ 添加交易</span>
-            </button>
-          </div>
+        <div class="trade-editor-list" id="tradeEditorList"></div>
 
-          <!-- Daily Summary -->
-          <div class="daily-summary">
-            <div class="summary-row">
-              <span>今日已实现损益</span>
-              <span class="daily-total" id="dailyTotal">¥0</span>
-            </div>
-          </div>
+        <button type="button" class="add-trade-btn" id="btnAddManualTrade">+ 再添加一笔</button>
+
+        <div class="sheet-actions">
+          <button type="button" class="ghost-btn danger" id="btnDeleteDay" hidden>删除当天记录</button>
+          <div class="sheet-actions-spacer"></div>
+          <button type="button" class="ghost-btn" id="btnCancelDaySheet">取消</button>
+          <button type="submit" class="primary-btn">保存</button>
         </div>
-
-        <!-- Form Actions -->
-        <div class="form-actions">
-          <button type="button" class="btn danger" id="btnDeleteDay" hidden>删除</button>
-          <div class="spacer"></div>
-          <button type="button" class="btn secondary" id="btnCancelSheet">取消</button>
-          <button type="submit" class="btn primary">保存</button>
-        </div>
-
-        <input type="hidden" id="fDayId" />
       </form>
     </div>
   </div>
 
-  <!-- Settings Sheet -->
   <div class="sheet" id="settingsSheet" aria-hidden="true">
     <div class="sheet-backdrop" id="settingsBackdrop"></div>
     <div class="sheet-panel">
       <div class="sheet-header">
         <div>
-          <h3 class="sheet-title">设置</h3>
-          <p class="sheet-subtitle">数据管理</p>
+          <div class="section-kicker">Settings</div>
+          <h2>设置</h2>
+          <p>保留云同步和 CSV 上传，移除旧的 JSON 导入导出。</p>
         </div>
-        <button class="icon-btn small" id="btnCloseSettings">✕</button>
+        <button class="icon-btn small" id="btnCloseSettings" aria-label="关闭">✕</button>
       </div>
 
-      <div class="settings-list">
-        <div class="settings-section-title">导出数据</div>
-        
-        <button class="settings-item" id="btnExport">
-          <div class="settings-item-content">
-            <span class="settings-icon">💾</span>
-            <div>
-              <div class="settings-title">下载 JSON 文件</div>
-              <div class="settings-desc">保存备份文件到设备</div>
-            </div>
+      <div class="settings-section">
+        <h3>CSV 上传</h3>
+        <button class="settings-item" id="btnUploadCsvFromSettings" type="button">
+          <div>
+            <strong>上传券商 CSV</strong>
+            <p>只导入株式現物和信用交易，自动忽略投信，并智能覆盖相同交易。</p>
           </div>
-          <span class="chevron">›</span>
+          <span>›</span>
         </button>
+        <p class="settings-note" id="csvSettingsHint">当前还没有导入记录。</p>
+      </div>
 
-        <button class="settings-item" id="btnExportCopy">
-          <div class="settings-item-content">
-            <span class="settings-icon">📋</span>
-            <div>
-              <div class="settings-title">复制到剪贴板</div>
-              <div class="settings-desc">复制数据文本方便分享</div>
-            </div>
-          </div>
-          <span class="chevron">›</span>
-        </button>
-
-        <button class="settings-item" id="btnExportTodayCopy">
-          <div class="settings-item-content">
-            <span class="settings-icon">📄</span>
-            <div>
-              <div class="settings-title">导出今日数据文本</div>
-              <div class="settings-desc">复制今日交易记录到剪贴板</div>
-            </div>
-          </div>
-          <span class="chevron">›</span>
-        </button>
-
-        <div class="settings-section-title">导入数据</div>
-
-        <label class="settings-item file-label">
-          <div class="settings-item-content">
-            <span class="settings-icon">📂</span>
-            <div>
-              <div class="settings-title">从文件导入</div>
-              <div class="settings-desc">选择 JSON 备份文件</div>
-            </div>
-          </div>
-          <input type="file" id="fileImport" accept="application/json" hidden />
-          <span class="chevron">›</span>
+      <div class="settings-section">
+        <h3>云同步（JSONBin）</h3>
+        <label class="field-group">
+          <span class="form-label">JSONBin API Key</span>
+          <input type="password" id="jsonbinApiKey" class="form-input" placeholder="$2a$10$..." />
         </label>
-
-        <button class="settings-item" id="btnImportPaste">
-          <div class="settings-item-content">
-            <span class="settings-icon">📝</span>
-            <div>
-              <div class="settings-title">粘贴文本导入</div>
-              <div class="settings-desc">粘贴之前复制的数据</div>
-            </div>
-          </div>
-          <span class="chevron">›</span>
-        </button>
-
-        <button class="settings-item" id="btnImportToday">
-          <div class="settings-item-content">
-            <span class="settings-icon">📥</span>
-            <div>
-              <div class="settings-title">导入今日数据</div>
-              <div class="settings-desc">粘贴导出的今日数据，合并到现有记录</div>
-            </div>
-          </div>
-          <span class="chevron">›</span>
-        </button>
-
-        <div class="settings-section-title">云同步 (JSONBin)</div>
-        <p class="settings-desc-inline">使用 JSONBin 与对方共享数据，两人需使用相同的 API Key 和 Bin ID。</p>
-        <div class="settings-item api-key-item">
-          <div class="settings-item-content">
-            <span class="settings-icon">🔐</span>
-            <div>
-              <div class="settings-title">JSONBin API Key (Master Key)</div>
-              <div class="settings-desc">在 <a href="https://jsonbin.io" target="_blank" rel="noopener">jsonbin.io</a> 注册后，在 Dashboard 复制</div>
-            </div>
-          </div>
+        <label class="field-group">
+          <span class="form-label">Bin ID</span>
+          <input type="text" id="jsonbinBinId" class="form-input" placeholder="首次上传可自动创建" />
+        </label>
+        <div class="settings-actions">
+          <button class="primary-btn" type="button" id="btnJsonbinPush">上传到云端</button>
+          <button class="ghost-btn" type="button" id="btnJsonbinPull">从云端拉取</button>
         </div>
-        <div class="api-key-input-wrapper">
-          <input type="password" id="jsonbinApiKey" class="api-key-input" placeholder="例如 $2a$10$..." />
-        </div>
-        <div class="settings-item api-key-item">
-          <div class="settings-item-content">
-            <span class="settings-icon">📦</span>
-            <div>
-              <div class="settings-title">Bin ID</div>
-              <div class="settings-desc">留空则首次「上传到云端」时自动创建，创建后请把此 ID 发给对方</div>
-            </div>
-          </div>
-        </div>
-        <div class="api-key-input-wrapper">
-          <input type="text" id="jsonbinBinId" class="api-key-input" placeholder="留空则首次上传时自动创建" />
-        </div>
-        <div class="jsonbin-actions">
-          <button type="button" class="btn primary" id="btnJsonbinPush">上传到云端</button>
-          <button type="button" class="btn secondary" id="btnJsonbinPull">从云端拉取</button>
-        </div>
-        <p class="jsonbin-sync-status" id="jsonbinSyncStatus">从未同步</p>
-
-        <div class="settings-section-title">AI 助手设置</div>
-
-        <div class="settings-item api-key-item">
-          <div class="settings-item-content">
-            <span class="settings-icon">🔑</span>
-            <div>
-              <div class="settings-title">OpenAI API Key</div>
-              <div class="settings-desc">用于 AI 助手功能</div>
-            </div>
-          </div>
-        </div>
-        <div class="api-key-input-wrapper">
-          <input type="password" id="openaiApiKey" class="api-key-input" placeholder="sk-..." />
-          <button type="button" class="toggle-visibility-btn" id="btnToggleApiKey">👁</button>
-        </div>
-
-        <button class="settings-item" id="btnClearChatHistory">
-          <div class="settings-item-content">
-            <span class="settings-icon">🗨️</span>
-            <div>
-              <div class="settings-title">清除聊天历史</div>
-              <div class="settings-desc">清空所有 AI 对话记录</div>
-            </div>
-          </div>
-          <span class="chevron">›</span>
-        </button>
-
-        <div class="settings-section-title">危险操作</div>
-
-        <button class="settings-item danger" id="btnClearAll">
-          <div class="settings-item-content">
-            <span class="settings-icon">🗑️</span>
-            <div>
-              <div class="settings-title">清空所有数据</div>
-              <div class="settings-desc">此操作不可撤销</div>
-            </div>
-          </div>
-          <span class="chevron">›</span>
-        </button>
+        <p class="settings-note" id="jsonbinSyncStatus">从未同步</p>
       </div>
 
-      <div class="settings-footer">
-        <p>甜饼工坊 v3.0</p>
-        <p>数据仅保存在本地设备</p>
+      <div class="settings-section danger-zone">
+        <h3>危险操作</h3>
+        <button class="settings-item danger" id="btnClearAll" type="button">
+          <div>
+            <strong>清空所有交易数据</strong>
+            <p>会删除本地 IndexedDB 中的所有交易记录，分红比例会恢复默认值。</p>
+          </div>
+          <span>›</span>
+        </button>
       </div>
     </div>
-  </div>
-
-  <!-- Import Paste Sheet -->
-  <div class="sheet" id="importPasteSheet" aria-hidden="true">
-    <div class="sheet-backdrop" id="importPasteBackdrop"></div>
-    <div class="sheet-panel">
-      <div class="sheet-header">
-        <div>
-          <h3 class="sheet-title">粘贴导入</h3>
-          <p class="sheet-subtitle">将复制的数据粘贴到下方</p>
-        </div>
-        <button class="icon-btn small" id="btnCloseImportPaste">✕</button>
-      </div>
-
-      <div class="import-paste-content">
-        <textarea id="importPasteText" class="paste-textarea" placeholder="在此粘贴 JSON 数据..."></textarea>
-        <div class="paste-actions">
-          <button type="button" class="btn secondary" id="btnCancelImportPaste">取消</button>
-          <button type="button" class="btn primary" id="btnConfirmImportPaste">确认导入</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- AI Assistant Page -->
-  <div class="app ai-page" id="aiPage" hidden>
-    <header class="header">
-      <div class="header-content">
-        <button class="back-btn" id="btnBackFromAI">
-          <span>←</span>
-          <span>返回</span>
-        </button>
-        <div class="title-group center">
-          <h1>💬 AI 助手</h1>
-        </div>
-        <div class="header-spacer"></div>
-      </div>
-    </header>
-
-    <main class="ai-main">
-      <div class="chat-container" id="chatContainer">
-        <!-- Chat messages will be inserted here -->
-      </div>
-      
-      <div class="chat-input-area">
-        <div class="quick-actions" id="quickActions">
-          <button class="quick-action-btn" id="btnSendTradeData">
-            <span class="quick-icon">📊</span>
-            <span>发送交易数据</span>
-          </button>
-          <button class="quick-action-btn" id="btnAskOther">
-            <span class="quick-icon">💬</span>
-            <span>问问交易以外的问题</span>
-          </button>
-        </div>
-        <div class="chat-input-wrapper">
-          <textarea id="chatInput" class="chat-input" placeholder="输入消息..." rows="1"></textarea>
-          <button class="send-btn" id="btnSendMessage" disabled>
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-    </main>
   </div>
 
   <script src="app.js"></script>
