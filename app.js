@@ -306,8 +306,59 @@ function openNamedDB(dbName, version, needsUpgradeHandler = false) {
   });
 }
 
+function dbHasRequiredSchema(db) {
+  if (!db.objectStoreNames.contains(STORE_NAME)) return false;
+
+  try {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    return store.indexNames.contains('date');
+  } catch {
+    return false;
+  }
+}
+
+function deleteNamedDB(dbName) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(dbName);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error(`数据库 ${dbName} 当前被占用，无法重建。`));
+  });
+}
+
 async function openDB() {
-  return openNamedDB(DB_NAME, DB_VERSION, true);
+  const recoverSchema = async (db) => {
+    const nextVersion = Math.max(Number(db.version) || 1, DB_VERSION) + 1;
+    db.close();
+
+    const upgradedDb = await openNamedDB(DB_NAME, nextVersion, true);
+    if (dbHasRequiredSchema(upgradedDb)) {
+      return upgradedDb;
+    }
+
+    upgradedDb.close();
+    await deleteNamedDB(DB_NAME);
+    return openNamedDB(DB_NAME, DB_VERSION, true);
+  };
+
+  try {
+    const db = await openNamedDB(DB_NAME, DB_VERSION, true);
+    if (dbHasRequiredSchema(db)) {
+      return db;
+    }
+    return recoverSchema(db);
+  } catch (error) {
+    if (error?.name !== 'VersionError') {
+      throw error;
+    }
+
+    const existingDb = await openNamedDB(DB_NAME);
+    if (dbHasRequiredSchema(existingDb)) {
+      return existingDb;
+    }
+    return recoverSchema(existingDb);
+  }
 }
 
 function readAllDaysFromDb(db) {
