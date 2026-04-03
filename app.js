@@ -2226,11 +2226,11 @@ function renderDaySheetTrades() {
         <div class="editor-row two">
           <label class="field-group">
             <span class="form-label">数量</span>
-            <input type="number" class="form-input" data-field="quantity" data-index="${index}" value="${trade.quantity ?? ''}" min="1" step="1" inputmode="numeric" placeholder="100" />
+            <input type="text" class="form-input" data-field="quantity" data-index="${index}" value="${trade.quantity ?? ''}" inputmode="numeric" placeholder="100" />
           </label>
           <label class="field-group">
             <span class="form-label">单价</span>
-            <input type="number" class="form-input" data-field="price" data-index="${index}" value="${trade.price ?? ''}" min="0" step="0.01" inputmode="decimal" placeholder="1234.5" />
+            <input type="text" class="form-input" data-field="price" data-index="${index}" value="${trade.price ?? ''}" inputmode="decimal" placeholder="1234.5" />
           </label>
         </div>
 
@@ -2266,16 +2266,16 @@ function renderDaySheetTrades() {
             <div class="editor-row two">
               <label class="field-group">
                 <span class="form-label">手续费</span>
-                <input type="number" class="form-input" data-field="fee" data-index="${index}" value="${trade.fee ?? ''}" min="0" step="0.01" inputmode="decimal" />
+                <input type="text" class="form-input" data-field="fee" data-index="${index}" value="${trade.fee ?? ''}" inputmode="decimal" />
               </label>
               <label class="field-group">
                 <span class="form-label">税额</span>
-                <input type="number" class="form-input" data-field="taxAmount" data-index="${index}" value="${trade.taxAmount ?? ''}" min="0" step="0.01" inputmode="decimal" />
+                <input type="text" class="form-input" data-field="taxAmount" data-index="${index}" value="${trade.taxAmount ?? ''}" inputmode="decimal" />
               </label>
             </div>
             <label class="field-group">
               <span class="form-label">受渡金额 / 决済损益</span>
-              <input type="number" class="form-input" data-field="settlementAmount" data-index="${index}" value="${trade.settlementAmount ?? ''}" step="0.01" inputmode="decimal" placeholder="可留空让系统按数量×单价估算" />
+              <input type="text" class="form-input" data-field="settlementAmount" data-index="${index}" value="${trade.settlementAmount ?? ''}" inputmode="decimal" placeholder="可留空让系统按数量×单价估算" />
             </label>
             <label class="field-group">
               <span class="form-label">备注</span>
