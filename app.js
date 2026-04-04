@@ -1,3 +1,7 @@
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/auth';
+import 'firebase/compat/firestore';
+
 // ===== 甜饼工坊 App v4.1.0 =====
 // 聚焦 CSV 上传、云同步、现物/信用分开统计、分红快照规则
 
@@ -21,6 +25,7 @@ if ('serviceWorker' in navigator) {
 // ===== Helpers =====
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+const hasLegacyUiRoot = () => typeof document !== 'undefined' && Boolean(document.querySelector('#mainPage'));
 
 const APP_VERSION = '4.1.0';
 const SETTINGS_KEY = 'trade_diary_settings_v4';
@@ -324,24 +329,33 @@ function calculateDividendWithRule(profit, ruleSnapshot) {
 
 // ===== Company Name Mapping =====
 let companyMap = new Map();
+let companyDataPromise = null;
 
 async function loadCompanyData() {
-  try {
-    const response = await fetch(`./companies_tse.json?v=${encodeURIComponent(APP_VERSION)}`);
-    if (!response.ok) return;
-
-    const data = await response.json();
-    if (Array.isArray(data.companies)) {
-      data.companies.forEach((company) => {
-        companyMap.set(String(company.code || '').toUpperCase(), {
-          name: company.name,
-          market: company.market
-        });
-      });
-    }
-  } catch (error) {
-    console.warn('Could not load company data:', error);
+  if (companyMap.size) return;
+  if (companyDataPromise) {
+    await companyDataPromise;
+    return;
   }
+
+  companyDataPromise = (async () => {
+    try {
+      const module = await import('./companies_tse.json');
+      const data = module?.default || module;
+      if (Array.isArray(data?.companies)) {
+        data.companies.forEach((company) => {
+          companyMap.set(String(company.code || '').toUpperCase(), {
+            name: company.name,
+            market: company.market
+          });
+        });
+      }
+    } catch (error) {
+      console.warn('Could not load company data:', error);
+    }
+  })();
+
+  await companyDataPromise;
 }
 
 function getCompanyName(symbol) {
@@ -1667,6 +1681,8 @@ let firebaseInitPromise = null;
 let firebaseAuthObserverAttached = false;
 let firebaseRedirectHandled = false;
 let firebasePendingPostLoginSync = false;
+let cloudSyncStatusText = '从未同步';
+let cloudAuthStatusText = '还没有填写 Firebase Web 配置。';
 
 // ===== Charts =====
 function getScopeAccent(scope) {
@@ -2159,24 +2175,27 @@ function updateCsvStatus() {
 
 function updateCloudSyncStatus(text) {
   const label = text || '从未同步';
+  cloudSyncStatusText = label;
   if ($('#cloudSyncStatus')) $('#cloudSyncStatus').textContent = label;
 }
 
 function updateCloudAuthStatus(message = '') {
-  const statusEl = $('#cloudAuthStatus');
-  if (!statusEl) return;
-
   if (message) {
-    statusEl.textContent = message;
+    cloudAuthStatusText = message;
   } else if (!trimText(firebaseConfigText)) {
-    statusEl.textContent = '还没有填写 Firebase Web 配置。';
+    cloudAuthStatusText = '还没有填写 Firebase Web 配置。';
   } else if (firebaseUser?.email) {
     const accountLabel = trimText(firebaseUser.displayName)
       ? `${trimText(firebaseUser.displayName)} · ${maskEmail(firebaseUser.email)}`
       : maskEmail(firebaseUser.email);
-    statusEl.textContent = `当前云账号：${accountLabel}`;
+    cloudAuthStatusText = `当前云账号：${accountLabel}`;
   } else {
-    statusEl.textContent = 'Firebase 已连接，当前未登录 Google。';
+    cloudAuthStatusText = 'Firebase 已连接，当前未登录 Google。';
+  }
+
+  const statusEl = $('#cloudAuthStatus');
+  if (statusEl) {
+    statusEl.textContent = cloudAuthStatusText;
   }
 
   const isSignedIn = Boolean(firebaseUser?.uid);
@@ -2257,6 +2276,12 @@ function setActiveTab(tab) {
 }
 
 function refreshVisiblePages() {
+  if (!hasLegacyUiRoot()) {
+    initCloudSyncStatus();
+    updateCloudAuthStatus();
+    return;
+  }
+
   updateMonthFilter();
   renderDashboardSummary();
   renderHomeOverview();
@@ -2730,20 +2755,27 @@ function openCloudClearConfirm(mode) {
   }
 
   cloudClearConfirmMode = mode === 'cloud' ? 'cloud' : 'local';
-  renderCloudClearConfirmStep();
-  $('#cloudClearSheet').setAttribute('aria-hidden', 'false');
+  if ($('#cloudClearSheet')) {
+    renderCloudClearConfirmStep();
+    $('#cloudClearSheet').setAttribute('aria-hidden', 'false');
+  }
 }
 
 function closeCloudClearConfirm() {
   cloudClearConfirmMode = '';
-  $('#cloudClearSheet').setAttribute('aria-hidden', 'true');
+  if ($('#cloudClearSheet')) {
+    $('#cloudClearSheet').setAttribute('aria-hidden', 'true');
+  }
 }
 
 async function clearCloudTradeData() {
   if (isCloudSyncing) return;
 
   try {
-    saveFirebaseConfigText($('#firebaseConfigInput').value || firebaseConfigText);
+    const configInput = $('#firebaseConfigInput');
+    if (configInput) {
+      saveFirebaseConfigText(configInput.value || firebaseConfigText);
+    }
     await ensureFirebaseReady();
     closeCloudClearConfirm();
     isCloudSyncing = true;
@@ -3371,6 +3403,151 @@ function bindEvents() {
   $('#btnClearCloud').addEventListener('click', () => openCloudClearConfirm('cloud'));
 }
 
+async function initializeTradeCore() {
+  await migrateLegacyDatabaseIfNeeded();
+  await loadCompanyData();
+  await initializeCloudSessionSilently();
+  await refresh();
+  return getTradeAppSnapshot();
+}
+
+function getTradeAppSnapshot() {
+  return {
+    version: APP_VERSION,
+    settings: deepClone(SETTINGS),
+    days: deepClone(DAYS),
+    analytics: deepClone(ANALYTICS),
+    firebase: {
+      configText: firebaseConfigText,
+      isSignedIn: Boolean(firebaseUser?.uid),
+      isSyncing: isCloudSyncing,
+      syncStatusText: cloudSyncStatusText,
+      authStatusText: cloudAuthStatusText,
+      user: firebaseUser
+        ? {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            displayName: firebaseUser.displayName || ''
+          }
+        : null
+    }
+  };
+}
+
+function applyManualTypeToTrade(trade, manualType, date = todayStr()) {
+  const config = MANUAL_TYPE_MAP[manualType] || MANUAL_TYPE_MAP.spot_buy;
+  return normalizeTrade({
+    ...trade,
+    manualType,
+    assetType: config.assetType,
+    action: config.action,
+    positionEffect: config.positionEffect,
+    positionSide: config.positionSide,
+    tradeTypeLabel: config.tradeTypeLabel,
+    ratioSnapshot: cloneActiveRuleSnapshot(config.assetType),
+    updatedAt: new Date().toISOString()
+  }, date, Number(trade?.order) || 0);
+}
+
+async function upsertManualDay({ date, trades, dayId = '' }) {
+  const normalizedDate = normalizeAnyDate(date);
+  if (!normalizedDate) {
+    throw new Error('请选择有效日期。');
+  }
+
+  const normalizedTrades = (Array.isArray(trades) ? trades : [])
+    .filter((trade) => trade?.fingerprint || isTradeComplete(trade))
+    .map((trade, index) => normalizeTrade({
+      ...trade,
+      updatedAt: new Date().toISOString()
+    }, normalizedDate, index));
+
+  if (!normalizedTrades.length) {
+    throw new Error('至少保留一笔有效交易再保存。');
+  }
+
+  const now = new Date().toISOString();
+  if (trimText(dayId)) {
+    const current = DAYS.find((day) => day.id === dayId)
+      || await getDayByDate(normalizedDate)
+      || { id: dayId, date: normalizedDate, trades: [] };
+
+    const nextDay = normalizeDay({
+      ...current,
+      date: normalizedDate,
+      trades: reindexTrades(normalizedTrades, normalizedDate),
+      updatedAt: now
+    });
+    await saveDay(nextDay);
+  } else {
+    const existing = await getDayByDate(normalizedDate);
+    if (existing) {
+      const mergedTrades = [
+        ...normalizeDay(existing).trades,
+        ...normalizedTrades.filter((trade) => !trade.fingerprint)
+      ];
+      await saveDay(normalizeDay({
+        ...existing,
+        trades: reindexTrades(mergedTrades, normalizedDate),
+        updatedAt: now
+      }));
+    } else {
+      await saveDay(normalizeDay({
+        id: generateId(),
+        date: normalizedDate,
+        trades: reindexTrades(normalizedTrades, normalizedDate),
+        updatedAt: now
+      }));
+    }
+  }
+
+  await refresh();
+  return getTradeAppSnapshot();
+}
+
+async function removeDayById(dayId) {
+  await deleteDay(dayId);
+  await refresh();
+  return getTradeAppSnapshot();
+}
+
+function updateDividendRule(assetType, numerator, denominator) {
+  const target = assetType === 'margin' ? 'margin' : 'cash';
+  SETTINGS.dividendRules[target] = createDividendRule(
+    target,
+    Math.max(1, parseInt(numerator, 10) || 1),
+    Math.max(1, parseInt(denominator, 10) || 1),
+    new Date().toISOString()
+  );
+  persistSettings();
+  initCloudSyncStatus();
+  updateCloudAuthStatus();
+  return getTradeAppSnapshot();
+}
+
+async function saveFirebaseConfig(rawValue) {
+  const { normalizedConfig, hasChanged } = saveFirebaseConfigText(rawValue || '');
+  if (firebaseApp && hasChanged) {
+    const sameProject = firebaseApp.options?.projectId === normalizedConfig.projectId && firebaseApp.options?.appId === normalizedConfig.appId;
+    if (!sameProject) {
+      updateCloudAuthStatus('Firebase 配置已保存，请刷新页面后重新连接。');
+      return {
+        requiresRefresh: true,
+        normalizedConfig,
+        snapshot: getTradeAppSnapshot()
+      };
+    }
+  }
+
+  await ensureFirebaseReady();
+  updateCloudAuthStatus(firebaseUser?.uid ? `当前云账号：${maskEmail(firebaseUser.email || '')}` : 'Firebase 配置已保存，可以继续使用 Google 登录。');
+  return {
+    requiresRefresh: false,
+    normalizedConfig,
+    snapshot: getTradeAppSnapshot()
+  };
+}
+
 // ===== Initialize =====
 async function init() {
   await migrateLegacyDatabaseIfNeeded();
@@ -3384,4 +3561,50 @@ async function init() {
   await refresh();
 }
 
-init();
+if (hasLegacyUiRoot()) {
+  init();
+}
+
+export {
+  APP_VERSION,
+  CLOUD_SYNC_META_KEY,
+  DIVIDEND_START_DATE,
+  FIREBASE_CONFIG_KEY,
+  MANUAL_TYPE_MAP,
+  RECORDS_PAGE_SIZE,
+  SCOPES,
+  addDays,
+  applyManualTypeToTrade,
+  buildAnalytics,
+  buildTradeSoftKey,
+  clearCloudTradeData,
+  clearLocalTradeData,
+  compareTradeProcessingOrder,
+  createManualTrade,
+  formatDateParts,
+  formatMoney,
+  formatPercent,
+  getManualTypeOptions,
+  getScopeLabel,
+  getStockDisplayName,
+  importCsvFile,
+  initializeTradeCore,
+  marketLabelFromKey,
+  maskEmail,
+  normalizeAnyDate,
+  normalizeDay,
+  normalizeTrade,
+  parseFirebaseConfigInput,
+  pullFromCloud,
+  pushToCloud,
+  removeDayById,
+  saveFirebaseConfig,
+  signInWithGoogle,
+  signOutFromFirebase,
+  todayStr,
+  trimText,
+  updateDividendRule,
+  upsertManualDay,
+  getTradeAppSnapshot,
+  getCurrentWeekMondayStr
+};
