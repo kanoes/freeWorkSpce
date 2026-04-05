@@ -495,6 +495,147 @@ function ScopeToggle({ value, onChange, ownerLabel }) {
   );
 }
 
+function AppTopBar({ title, meta, trailing, children }) {
+  return (
+    <section className="app-topbar">
+      <div className="app-topbar-main">
+        <div>
+          <h1>{title}</h1>
+          {meta ? <div className="app-topbar-meta">{meta}</div> : null}
+        </div>
+        {trailing ? <div className="app-topbar-side">{trailing}</div> : null}
+      </div>
+      {children ? <div className="app-topbar-actions">{children}</div> : null}
+    </section>
+  );
+}
+
+function RecordFilterSheet({
+  open,
+  recordFilters,
+  setRecordFilters,
+  dashboardScope,
+  setDashboardScope,
+  monthOptions,
+  onReset,
+  onClose
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="sheet" aria-hidden="false">
+      <div className="sheet-backdrop" onClick={onClose} />
+      <div className="sheet-panel">
+        <div className="sheet-header">
+          <div>
+            <div className="section-kicker">记录筛选</div>
+            <h2>筛选条件</h2>
+          </div>
+          <button className="icon-btn small" type="button" onClick={onClose} aria-label="关闭">✕</button>
+        </div>
+
+        <div className="filter-panel-stack">
+          <div className="field-group">
+            <span className="form-label">记录视角</span>
+            <ScopeToggle value={dashboardScope} onChange={setDashboardScope} ownerLabel="records-sheet" />
+          </div>
+          <label className="field-group">
+            <span className="form-label">月份</span>
+            <select
+              className="form-input"
+              value={recordFilters.month}
+              onChange={(event) => setRecordFilters((current) => ({ ...current, month: event.target.value }))}
+            >
+              <option value="all">全部</option>
+              {monthOptions.map((month) => (
+                <option key={month} value={month}>
+                  {month.replace('-', '年')}月
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-group">
+            <span className="form-label">搜索</span>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="代码、名称、备注、交易类型"
+              value={recordFilters.search}
+              onChange={(event) => setRecordFilters((current) => ({ ...current, search: event.target.value }))}
+            />
+          </label>
+          <div className="field-group">
+            <span className="form-label">来源</span>
+            <SegmentedControl
+              value={recordFilters.source}
+              onChange={(value) => setRecordFilters((current) => ({ ...current, source: value }))}
+              ownerLabel="record-source-sheet"
+              className="mini-toggle block"
+              compact
+              options={[
+                { value: 'all', label: '全部' },
+                { value: 'csv', label: 'CSV' },
+                { value: 'manual', label: '手动' }
+              ]}
+            />
+          </div>
+          <div className="field-group">
+            <span className="form-label">结果</span>
+            <SegmentedControl
+              value={recordFilters.outcome}
+              onChange={(value) => setRecordFilters((current) => ({ ...current, outcome: value }))}
+              ownerLabel="record-outcome-sheet"
+              className="mini-toggle block four"
+              compact
+              options={[
+                { value: 'all', label: '全部' },
+                { value: 'win', label: '盈利' },
+                { value: 'loss', label: '亏损' },
+                { value: 'flat', label: '平盘' }
+              ]}
+            />
+          </div>
+          <div className="field-group">
+            <span className="form-label">排序</span>
+            <SegmentedControl
+              value={recordFilters.sort}
+              onChange={(value) => setRecordFilters((current) => ({ ...current, sort: value }))}
+              ownerLabel="record-sort-sheet"
+              className="mini-toggle block"
+              compact
+              options={[
+                { value: 'desc', label: '最新' },
+                { value: 'oldest', label: '最早' },
+                { value: 'profit', label: '波动' }
+              ]}
+            />
+          </div>
+          <div className="field-group">
+            <span className="form-label">密度</span>
+            <SegmentedControl
+              value={recordFilters.compact ? 'compact' : 'comfortable'}
+              onChange={(value) => setRecordFilters((current) => ({ ...current, compact: value === 'compact' }))}
+              ownerLabel="record-density-sheet"
+              className="mini-toggle block"
+              compact
+              options={[
+                { value: 'comfortable', label: '舒适' },
+                { value: 'compact', label: '紧凑' }
+              ]}
+            />
+          </div>
+        </div>
+
+        <div className="sheet-actions">
+          <button type="button" className="ghost-btn" onClick={onReset}>清空</button>
+          <div className="sheet-actions-spacer" />
+          <button type="button" className="primary-btn" onClick={onClose}>完成</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Icon({ name }) {
   if (name === 'home') {
     return (
@@ -1085,10 +1226,15 @@ export function App() {
   const [dashboardScope, setDashboardScope] = useState('all');
   const [analysisScope, setAnalysisScope] = useState('all');
   const [dividendScope, setDividendScope] = useState('all');
+  const [homePanel, setHomePanel] = useState('overview');
+  const [analysisPanel, setAnalysisPanel] = useState('metrics');
+  const [dividendPanel, setDividendPanel] = useState('summary');
+  const [settingsPanel, setSettingsPanel] = useState('data');
   const [chartRange, setChartRange] = useState('week');
   const [chartType, setChartType] = useState('cumulative');
   const [recordsPage, setRecordsPage] = useState(0);
   const [recordFilters, setRecordFilters] = useState(DEFAULT_RECORD_FILTERS);
+  const [recordFilterSheetOpen, setRecordFilterSheetOpen] = useState(false);
   const [manualSheet, setManualSheet] = useState(createEmptySheetState());
   const [ratioSheet, setRatioSheet] = useState(createRatioState());
   const [confirmState, setConfirmState] = useState({ open: false, mode: 'local' });
@@ -1460,77 +1606,57 @@ export function App() {
       <div className="app-shell app-shell-react">
         {activeTab === 'home' ? (
           <div className="app-page tab-page">
-            <section className="page-hero page-hero-home">
-              <div className="page-hero-main">
-                <div>
-                  <div className="section-kicker">Trade Ledger</div>
-                  <h1>交易总览</h1>
-                  <p>累计收益、最近节奏、当前在仓、同步状态和数据健康，第一屏直接扫完。</p>
-                </div>
-                <div className="page-hero-side">
-                  <div className="date-chip">{formatDateParts(todayStr()).fullLabel}</div>
-                  <div className="hero-account-card">
-                    <span>云账号</span>
-                    <strong>{currentAccountLabel}</strong>
-                  </div>
-                </div>
-              </div>
-              <div className="page-hero-toolbar">
+            <AppTopBar
+              title="总览"
+              meta={formatDateParts(todayStr()).fullLabel}
+              trailing={<StatusBadge tone={snapshot.firebase.isSignedIn ? 'success' : 'warning'}>{snapshot.firebase.isSignedIn ? currentAccountLabel : '未连接'}</StatusBadge>}
+            >
+              <div className="topbar-toolbar">
                 <ScopeToggle value={dashboardScope} onChange={setDashboardScope} ownerLabel="dashboard-home" />
                 <div className="quick-action-row">
-                  <button type="button" className="secondary-btn" onClick={openAddSheet}>手动录入</button>
-                  <button type="button" className="ghost-btn" onClick={() => csvInputRef.current?.click()}>导入 CSV</button>
-                  <button type="button" className="ghost-btn" onClick={() => setActiveTab('settings')}>同步设置</button>
+                  <button type="button" className="secondary-btn" onClick={openAddSheet}>录入</button>
+                  <button type="button" className="ghost-btn" onClick={() => csvInputRef.current?.click()}>CSV</button>
+                  <button type="button" className="ghost-btn" onClick={() => setActiveTab('settings')}>同步</button>
                 </div>
               </div>
-            </section>
+              <SegmentedControl
+                value={homePanel}
+                onChange={setHomePanel}
+                ownerLabel="home-panel"
+                className="panel-switcher"
+                options={[
+                  { value: 'overview', label: '概览' },
+                  { value: 'trend', label: '趋势' },
+                  { value: 'health', label: '健康' }
+                ]}
+              />
+            </AppTopBar>
 
-            <div className="dashboard-grid">
-              <div className="dashboard-main-stack">
+            {homePanel === 'overview' ? (
+              <div className="panel-stack">
                 <section className="card hero-overview-card">
-                  <div className="hero-overview-head">
-                    <div>
-                      <div className="section-kicker">核心收益</div>
-                      <h2>收益和节奏先看这一块</h2>
-                    </div>
-                    <StatusBadge tone={snapshot.firebase.isSignedIn ? 'success' : 'warning'}>
-                      {snapshot.firebase.isSignedIn ? '云同步已连接' : '云同步未连接'}
-                    </StatusBadge>
-                  </div>
                   <div className="hero-overview-grid">
                     <div className="hero-overview-primary">
                       <span className="summary-label">累计已实现收益</span>
                       <strong className={`mega-profit ${getValueTone(dashboardSummary.totalProfit)}`}>
                         {formatMoney(dashboardSummary.totalProfit, { signed: false })}
                       </strong>
-                      <p className="summary-note">
-                        {dashboardSummary.closeTradeCount
-                          ? `${dashboardSummary.closeTradeCount} 笔已实现平仓 / 卖出`
-                          : '还没有已实现收益记录'}
-                        {dashboardSummary.financingCost > 0 ? ` · 已扣融资成本 ${formatMoney(dashboardSummary.financingCost, { signed: false })}` : ''}
-                      </p>
                     </div>
                     <div className="hero-overview-metrics">
                       <article className="mini-stat highlight">
-                        <span>今天收益</span>
-                        <strong className={getValueTone(dashboardSummary.today.profit)}>
-                          {formatMoney(dashboardSummary.today.profit)}
-                        </strong>
+                        <span>今天</span>
+                        <strong className={getValueTone(dashboardSummary.today.profit)}>{formatMoney(dashboardSummary.today.profit)}</strong>
                       </article>
                       <article className="mini-stat">
-                        <span>本周收益</span>
-                        <strong className={getValueTone(dashboardSummary.week.profit)}>
-                          {formatMoney(dashboardSummary.week.profit)}
-                        </strong>
+                        <span>本周</span>
+                        <strong className={getValueTone(dashboardSummary.week.profit)}>{formatMoney(dashboardSummary.week.profit)}</strong>
                       </article>
                       <article className="mini-stat">
-                        <span>本月收益</span>
-                        <strong className={getValueTone(currentMonthProfit)}>
-                          {formatMoney(currentMonthProfit)}
-                        </strong>
+                        <span>本月</span>
+                        <strong className={getValueTone(currentMonthProfit)}>{formatMoney(currentMonthProfit)}</strong>
                       </article>
                       <article className="mini-stat">
-                        <span>当前在仓</span>
+                        <span>在仓</span>
                         <strong>{dashboardSummary.positionsCount}</strong>
                       </article>
                     </div>
@@ -1546,199 +1672,172 @@ export function App() {
                     </article>
                     <article className="signal-chip-card">
                       <span>本周分红</span>
-                      <strong className={getValueTone(dashboardSummary.week.dividend)}>
-                        {formatMoney(dashboardSummary.week.dividend)}
-                      </strong>
+                      <strong className={getValueTone(dashboardSummary.week.dividend)}>{formatMoney(dashboardSummary.week.dividend)}</strong>
                     </article>
                     <article className="signal-chip-card">
-                      <span>最大回撤</span>
-                      <strong className="negative">
-                        {formatMoney(dashboardDiagnostics.maxDrawdown, { signed: false })}
-                      </strong>
+                      <span>回撤</span>
+                      <strong className="negative">{formatMoney(dashboardDiagnostics.maxDrawdown, { signed: false })}</strong>
                     </article>
                   </div>
                 </section>
 
-                <section className="card chart-stage-card">
-                  <div className="card-header chart-card-header">
-                    <div>
-                      <div className="section-kicker">收益趋势</div>
-                      <h2>{chartType === 'cumulative' ? '累计收益走势' : '日收益走势'}</h2>
-                    </div>
-                    <div className="chart-controls">
-                      <SegmentedControl
-                        value={chartRange}
-                        onChange={setChartRange}
-                        ownerLabel="chart-range"
-                        className="mini-toggle"
-                        compact
-                        options={[
-                          { value: 'week', label: '近7天' },
-                          { value: 'month', label: '近30天' },
-                          { value: 'all', label: '全部' }
-                        ]}
-                      />
-                      <SegmentedControl
-                        value={chartType}
-                        onChange={setChartType}
-                        ownerLabel="chart-type"
-                        className="mini-toggle"
-                        compact
-                        options={[
-                          { value: 'cumulative', label: '累计' },
-                          { value: 'daily', label: '每日' }
-                        ]}
-                      />
-                    </div>
+                <section className="card compact-grid-card">
+                  <div className="results-hero-grid">
+                    <article className="overview-card compact">
+                      <span className="overview-label">最近交易日</span>
+                      <strong className="overview-value">{latestDay ? formatDateParts(latestDay.date).label : '--'}</strong>
+                      <span className="overview-meta">{latestDay ? formatMoney(latestDay.scopes[dashboardScope].profit) : '暂无'}</span>
+                    </article>
+                    <article className="overview-card compact">
+                      <span className="overview-label">最佳单日</span>
+                      <strong className="overview-value">{dashboardExtremes.best ? formatDateParts(dashboardExtremes.best.date).label : '--'}</strong>
+                      <span className="overview-meta">{dashboardExtremes.best ? formatMoney(dashboardExtremes.best.scopes[dashboardScope].profit) : '暂无'}</span>
+                    </article>
+                    <article className="overview-card compact">
+                      <span className="overview-label">交易天数</span>
+                      <strong className="overview-value">{dashboardSummary.activeDays}</strong>
+                      <span className="overview-meta">标的 {dashboardSummary.symbolCount}</span>
+                    </article>
+                    <article className="overview-card compact">
+                      <span className="overview-label">同步</span>
+                      <strong className="overview-value">{snapshot.firebase.isSignedIn ? '已连接' : '未连接'}</strong>
+                      <span className="overview-meta">{snapshot.firebase.syncStatusText}</span>
+                    </article>
                   </div>
-                  <div className="chart-stage-summary">
-                    <div className="chart-summary-item">
-                      <span>区间交易日</span>
-                      <strong>{dashboardTimeline.length}</strong>
-                    </div>
-                    <div className="chart-summary-item">
-                      <span>最强单日</span>
-                      <strong className={dashboardExtremes.best ? getValueTone(dashboardExtremes.best.scopes[dashboardScope].profit) : 'neutral'}>
-                        {dashboardExtremes.best ? formatMoney(dashboardExtremes.best.scopes[dashboardScope].profit) : '暂无'}
-                      </strong>
-                    </div>
-                    <div className="chart-summary-item">
-                      <span>最弱单日</span>
-                      <strong className={dashboardExtremes.worst ? getValueTone(dashboardExtremes.worst.scopes[dashboardScope].profit) : 'neutral'}>
-                        {dashboardExtremes.worst ? formatMoney(dashboardExtremes.worst.scopes[dashboardScope].profit) : '暂无'}
-                      </strong>
-                    </div>
+                </section>
+              </div>
+            ) : null}
+
+            {homePanel === 'trend' ? (
+              <section className="card chart-stage-card">
+                <div className="card-header chart-card-header">
+                  <div>
+                    <div className="section-kicker">收益趋势</div>
+                    <h2>{chartType === 'cumulative' ? '累计' : '每日'}</h2>
                   </div>
-                  <div className="chart-box">
-                    {dashboardTimeline.length ? (
-                      <Line
-                        data={chartData}
-                        options={{
-                          responsive: true,
-                          maintainAspectRatio: false,
-                          interaction: {
-                            mode: 'index',
-                            intersect: false
-                          },
-                          plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                              displayColors: false,
-                              callbacks: {
-                                title: (items) => {
-                                  const point = dashboardTimeline[items[0]?.dataIndex];
-                                  return point ? formatDateParts(point.date).fullLabel : '';
-                                },
-                                label: (context) => {
-                                  const point = dashboardTimeline[context.dataIndex];
-                                  if (!point) return '';
-                                  return [
-                                    `当日收益 ${formatMoney(point.profit)}`,
-                                    `累计收益 ${formatMoney(point.cumulative)}`,
-                                    `交易 ${point.tradeCount} 笔`,
-                                    `分红 ${formatMoney(point.dividend)}`
-                                  ];
-                                }
-                              }
-                            }
-                          },
-                          scales: {
-                            x: {
-                              grid: { display: false },
-                              ticks: { color: 'rgba(70, 48, 32, 0.58)', maxRotation: 0 }
-                            },
-                            y: {
-                              grid: { color: 'rgba(92, 66, 48, 0.08)' },
-                              ticks: {
-                                color: 'rgba(70, 48, 32, 0.58)',
-                                maxTicksLimit: 5,
-                                callback: (value) => `¥${value}`
+                  <div className="chart-controls">
+                    <SegmentedControl
+                      value={chartRange}
+                      onChange={setChartRange}
+                      ownerLabel="chart-range"
+                      className="mini-toggle"
+                      compact
+                      options={[
+                        { value: 'week', label: '7天' },
+                        { value: 'month', label: '30天' },
+                        { value: 'all', label: '全部' }
+                      ]}
+                    />
+                    <SegmentedControl
+                      value={chartType}
+                      onChange={setChartType}
+                      ownerLabel="chart-type"
+                      className="mini-toggle"
+                      compact
+                      options={[
+                        { value: 'cumulative', label: '累计' },
+                        { value: 'daily', label: '每日' }
+                      ]}
+                    />
+                  </div>
+                </div>
+                <div className="chart-stage-summary">
+                  <div className="chart-summary-item">
+                    <span>交易日</span>
+                    <strong>{dashboardTimeline.length}</strong>
+                  </div>
+                  <div className="chart-summary-item">
+                    <span>最高</span>
+                    <strong className={dashboardExtremes.best ? getValueTone(dashboardExtremes.best.scopes[dashboardScope].profit) : 'neutral'}>
+                      {dashboardExtremes.best ? formatMoney(dashboardExtremes.best.scopes[dashboardScope].profit) : '--'}
+                    </strong>
+                  </div>
+                  <div className="chart-summary-item">
+                    <span>最低</span>
+                    <strong className={dashboardExtremes.worst ? getValueTone(dashboardExtremes.worst.scopes[dashboardScope].profit) : 'neutral'}>
+                      {dashboardExtremes.worst ? formatMoney(dashboardExtremes.worst.scopes[dashboardScope].profit) : '--'}
+                    </strong>
+                  </div>
+                </div>
+                <div className="chart-box">
+                  {dashboardTimeline.length ? (
+                    <Line
+                      data={chartData}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                          mode: 'index',
+                          intersect: false
+                        },
+                        plugins: {
+                          legend: { display: false },
+                          tooltip: {
+                            displayColors: false,
+                            callbacks: {
+                              title: (items) => {
+                                const point = dashboardTimeline[items[0]?.dataIndex];
+                                return point ? formatDateParts(point.date).fullLabel : '';
+                              },
+                              label: (context) => {
+                                const point = dashboardTimeline[context.dataIndex];
+                                if (!point) return '';
+                                return [
+                                  `当日 ${formatMoney(point.profit)}`,
+                                  `累计 ${formatMoney(point.cumulative)}`,
+                                  `交易 ${point.tradeCount} 笔`,
+                                  `分红 ${formatMoney(point.dividend)}`
+                                ];
                               }
                             }
                           }
-                        }}
-                      />
-                    ) : (
-                      <div className="empty-state">
-                        <div className="empty-icon">📈</div>
-                        <div className="empty-title">这个范围还没有收益曲线</div>
-                        <div className="empty-desc">先导入 CSV 或手动录入后，这里会出现趋势。</div>
-                      </div>
-                    )}
-                  </div>
-                </section>
-
-                <section className="summary-grid dashboard-summary-grid">
-                  <SummaryCard label="交易天数" value={dashboardSummary.activeDays} note="有交易的日期" />
-                  <SummaryCard label="交易标的" value={dashboardSummary.symbolCount} note="去重后的代码数" />
-                  <SummaryCard
-                    label="今日分红"
-                    value={formatMoney(dashboardSummary.today.dividend)}
-                    note={dashboardSummary.today.tradeCount ? `今日 ${dashboardSummary.today.tradeCount} 笔交易` : '今天暂无分红'}
-                    tone={getValueTone(dashboardSummary.today.dividend)}
-                  />
-                  <SummaryCard
-                    label="累计融资成本"
-                    value={formatMoney(dashboardSummary.financingCost, { signed: false })}
-                    note="已从信用收益中扣除"
-                    tone={dashboardSummary.financingCost > 0 ? 'negative' : 'neutral'}
-                  />
-                </section>
-              </div>
-
-              <div className="dashboard-side-stack">
-                <section className="card side-panel-card">
-                  <div className="card-header">
-                    <div>
-                      <div className="section-kicker">近期动向</div>
-                      <h2>最近在发生什么</h2>
+                        },
+                        scales: {
+                          x: {
+                            grid: { display: false },
+                            ticks: { color: 'rgba(70, 48, 32, 0.58)', maxRotation: 0 }
+                          },
+                          y: {
+                            grid: { color: 'rgba(92, 66, 48, 0.08)' },
+                            ticks: {
+                              color: 'rgba(70, 48, 32, 0.58)',
+                              maxTicksLimit: 5,
+                              callback: (value) => `¥${value}`
+                            }
+                          }
+                        }
+                      }}
+                    />
+                  ) : (
+                    <div className="empty-state">
+                      <div className="empty-icon">📈</div>
+                      <div className="empty-title">暂无曲线</div>
                     </div>
-                  </div>
-                  <div className="insight-list">
-                    <article className="insight-card">
-                      <span className="insight-label">最近交易日</span>
-                      <strong>{latestDay ? formatDateParts(latestDay.date).fullLabel : '暂无记录'}</strong>
-                      <span className="insight-note">
-                        {latestDay
-                          ? `${latestDay.scopes[dashboardScope].tradeCount} 笔交易 · ${formatMoney(latestDay.scopes[dashboardScope].profit)}`
-                          : '录入后会在这里显示最近活动'}
-                      </span>
-                    </article>
-                    <article className="insight-card">
-                      <span className="insight-label">最佳单日</span>
-                      <strong>{dashboardExtremes.best ? formatDateParts(dashboardExtremes.best.date).label : '暂无'}</strong>
-                      <span className={`insight-note ${dashboardExtremes.best ? getValueTone(dashboardExtremes.best.scopes[dashboardScope].profit) : ''}`}>
-                        {dashboardExtremes.best ? formatMoney(dashboardExtremes.best.scopes[dashboardScope].profit) : '暂无交易'}
-                      </span>
-                    </article>
-                    <article className="insight-card">
-                      <span className="insight-label">最大回吐日</span>
-                      <strong>{dashboardExtremes.worst ? formatDateParts(dashboardExtremes.worst.date).label : '暂无'}</strong>
-                      <span className={`insight-note ${dashboardExtremes.worst ? getValueTone(dashboardExtremes.worst.scopes[dashboardScope].profit) : ''}`}>
-                        {dashboardExtremes.worst ? formatMoney(dashboardExtremes.worst.scopes[dashboardScope].profit) : '暂无交易'}
-                      </span>
-                    </article>
-                  </div>
-                </section>
+                  )}
+                </div>
+              </section>
+            ) : null}
 
+            {homePanel === 'health' ? (
+              <div className="panel-grid two">
                 <section className="card side-panel-card">
                   <div className="card-header">
                     <div>
-                      <div className="section-kicker">健康检查</div>
-                      <h2>数据可信度</h2>
+                      <div className="section-kicker">数据</div>
+                      <h2>健康检查</h2>
                     </div>
                   </div>
                   <div className="health-grid">
                     <div className="health-item">
-                      <span>重复记录</span>
+                      <span>重复</span>
                       <strong>{healthReport.duplicateCount}</strong>
                     </div>
                     <div className="health-item">
-                      <span>未匹配平仓</span>
+                      <span>未匹配</span>
                       <strong>{healthReport.orphanCloseCount}</strong>
                     </div>
                     <div className="health-item">
-                      <span>当前在仓</span>
+                      <span>在仓</span>
                       <strong>{snapshot.analytics.summaries.all.positionsCount}</strong>
                     </div>
                   </div>
@@ -1747,410 +1846,281 @@ export function App() {
                       {healthReport.duplicateExamples.map((item, index) => (
                         <div className="health-row" key={`dup-${index}`}>
                           <span className="chip warning">重复</span>
-                          <span>{formatDateParts(item.date).label} · {getStockDisplayName(item.symbol, item.name)} · {item.tradeTypeLabel}</span>
+                          <span>{formatDateParts(item.date).label} · {getStockDisplayName(item.symbol, item.name)}</span>
                         </div>
                       ))}
                       {healthReport.orphanExamples.map((item, index) => (
                         <div className="health-row" key={`orphan-${index}`}>
                           <span className="chip danger">未匹配</span>
-                          <span>{formatDateParts(item.date).label} · {getStockDisplayName(item.symbol, item.name)} · 缺少 {item.missingQuantity} 股对应仓位</span>
+                          <span>{formatDateParts(item.date).label} · {getStockDisplayName(item.symbol, item.name)} · {item.missingQuantity} 股</span>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="empty-desc">当前数据看起来是干净的，没有明显重复，也没有卖出大于持仓的记录。</p>
+                    <div className="empty-state compact">
+                      <div className="empty-title">没有异常</div>
+                    </div>
                   )}
                 </section>
 
                 <section className="card side-panel-card">
                   <div className="card-header">
                     <div>
-                      <div className="section-kicker">同步与导入</div>
-                      <h2>当前工作状态</h2>
+                      <div className="section-kicker">状态</div>
+                      <h2>同步与导入</h2>
                     </div>
                   </div>
                   <div className="insight-list">
                     <article className="insight-card compact">
-                      <span className="insight-label">CSV 导入</span>
-                      <strong>{snapshot.settings.lastCsvImportAt ? formatDateParts(snapshot.settings.lastCsvImportAt).label : '尚未导入'}</strong>
+                      <span className="insight-label">云同步</span>
+                      <strong>{snapshot.firebase.isSignedIn ? '已连接' : '未连接'}</strong>
+                      <span className="insight-note">{snapshot.firebase.syncStatusText}</span>
+                    </article>
+                    <article className="insight-card compact">
+                      <span className="insight-label">CSV</span>
+                      <strong>{snapshot.settings.lastCsvImportAt ? formatDateParts(snapshot.settings.lastCsvImportAt).label : '未导入'}</strong>
                       <span className="insight-note">
                         {snapshot.settings.lastCsvImportSummary
-                          ? `共 ${snapshot.settings.lastCsvImportSummary.totalRows} 行，导入 ${snapshot.settings.lastCsvImportSummary.importedRows} 行`
-                          : '支持券商约定履历 CSV 导入'}
+                          ? `${snapshot.settings.lastCsvImportSummary.importedRows} 行`
+                          : '无记录'}
                       </span>
                     </article>
                     <article className="insight-card compact">
-                      <span className="insight-label">同步模式</span>
-                      <strong>镜像同步</strong>
-                      <span className="insight-note">上传：本地覆盖云端；拉取：云端覆盖本地</span>
-                    </article>
-                    <article className="insight-card compact">
-                      <span className="insight-label">当前版本</span>
+                      <span className="insight-label">版本</span>
                       <strong>v{snapshot.version}</strong>
-                      <span className="insight-note">{snapshot.firebase.syncStatusText}</span>
+                      <span className="insight-note">{currentAccountLabel}</span>
                     </article>
                   </div>
                 </section>
               </div>
-            </div>
+            ) : null}
           </div>
         ) : null}
 
         {activeTab === 'records' ? (
           <div className="app-page tab-page">
-            <section className="page-hero">
-              <div className="page-hero-main">
-                <div>
-                  <div className="section-kicker">交易记录</div>
-                  <h1>查历史不该靠拼命下拉</h1>
-                  <p>先筛范围，再看按日汇总和日内明细，尽量少做无效滚动。</p>
+            <AppTopBar
+              title="记录"
+              meta={`${filteredRecordDays.length} 个交易日`}
+              trailing={<strong className={getValueTone(filteredRecordSummary.totalProfit)}>{formatMoney(filteredRecordSummary.totalProfit)}</strong>}
+            >
+              <div className="topbar-toolbar">
+                <ScopeToggle value={dashboardScope} onChange={setDashboardScope} ownerLabel="records" />
+                <div className="quick-action-row">
+                  <button type="button" className="secondary-btn" onClick={() => setRecordFilterSheetOpen(true)}>
+                    筛选{hasActiveRecordFilters ? ` ${recordFilterBadges.length}` : ''}
+                  </button>
+                  <button type="button" className="ghost-btn" onClick={openAddSheet}>录入</button>
+                  <button type="button" className="ghost-btn" onClick={() => csvInputRef.current?.click()}>CSV</button>
                 </div>
-                <div className="page-hero-side compact">
-                  <div className="hero-account-card">
-                    <span>命中交易日</span>
-                    <strong>{filteredRecordDays.length}</strong>
-                  </div>
-                  <div className="hero-account-card">
-                    <span>筛选收益</span>
-                    <strong className={getValueTone(filteredRecordSummary.totalProfit)}>
-                      {formatMoney(filteredRecordSummary.totalProfit)}
-                    </strong>
-                  </div>
-                </div>
+              </div>
+            </AppTopBar>
+
+            {hasActiveRecordFilters ? (
+              <div className="filter-badge-wrap badge-strip">
+                {recordFilterBadges.map((badge) => (
+                  <StatusBadge key={badge.label} tone={badge.tone}>{badge.label}</StatusBadge>
+                ))}
+              </div>
+            ) : null}
+
+            <section className="card results-hero-card compact-grid-card">
+              <div className="results-hero-grid">
+                <article className="overview-card compact">
+                  <span className="overview-label">收益</span>
+                  <strong className={`overview-value ${getValueTone(filteredRecordSummary.totalProfit)}`}>
+                    {formatMoney(filteredRecordSummary.totalProfit)}
+                  </strong>
+                  <span className="overview-meta">{filteredRecordDays.length} 天</span>
+                </article>
+                <article className="overview-card compact">
+                  <span className="overview-label">交易</span>
+                  <strong className="overview-value">{filteredRecordSummary.tradeCount}</strong>
+                  <span className="overview-meta">当前筛选</span>
+                </article>
+                <article className="overview-card compact">
+                  <span className="overview-label">盈 / 亏</span>
+                  <strong className="overview-value">{filteredRecordSummary.winDays} / {filteredRecordSummary.lossDays}</strong>
+                  <span className="overview-meta">按日</span>
+                </article>
+                <article className="overview-card compact">
+                  <span className="overview-label">分红</span>
+                  <strong className={`overview-value ${getValueTone(filteredRecordSummary.dividend)}`}>
+                    {formatMoney(filteredRecordSummary.dividend)}
+                  </strong>
+                  <span className="overview-meta">当前筛选</span>
+                </article>
               </div>
             </section>
 
-            <div className="records-layout">
-              <aside className="card filter-panel">
-                <div className="card-header">
-                  <div>
-                    <div className="section-kicker">筛选与视角</div>
-                    <h2>{getScopeLabel(dashboardScope)}记录</h2>
-                  </div>
+            <section className="card">
+              <div className="records-toolbar">
+                <div className="records-page-meta">
+                  {totalRecordPages ? `${safeRecordsPage + 1} / ${totalRecordPages}` : '0 / 0'}
                 </div>
-                <div className="filter-panel-stack">
-                  <div className="field-group">
-                    <span className="form-label">记录视角</span>
-                    <ScopeToggle value={dashboardScope} onChange={setDashboardScope} ownerLabel="records" />
-                  </div>
-                  <label className="field-group">
-                    <span className="form-label">月份</span>
-                    <select
-                      className="form-input"
-                      value={recordFilters.month}
-                      onChange={(event) => setRecordFilters((current) => ({ ...current, month: event.target.value }))}
-                    >
-                      <option value="all">全部</option>
-                      {monthOptions.map((month) => (
-                        <option key={month} value={month}>
-                          {month.replace('-', '年')}月
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field-group">
-                    <span className="form-label">搜索股票 / 备注</span>
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="代码、名称、备注、交易类型"
-                      value={recordFilters.search}
-                      onChange={(event) => setRecordFilters((current) => ({ ...current, search: event.target.value }))}
-                    />
-                  </label>
-                  <div className="field-group">
-                    <span className="form-label">来源</span>
-                    <SegmentedControl
-                      value={recordFilters.source}
-                      onChange={(value) => setRecordFilters((current) => ({ ...current, source: value }))}
-                      ownerLabel="record-source"
-                      className="mini-toggle block"
-                      compact
-                      options={[
-                        { value: 'all', label: '全部' },
-                        { value: 'csv', label: 'CSV' },
-                        { value: 'manual', label: '手动' }
-                      ]}
-                    />
-                  </div>
-                  <div className="field-group">
-                    <span className="form-label">结果</span>
-                    <SegmentedControl
-                      value={recordFilters.outcome}
-                      onChange={(value) => setRecordFilters((current) => ({ ...current, outcome: value }))}
-                      ownerLabel="record-outcome"
-                      className="mini-toggle block four"
-                      compact
-                      options={[
-                        { value: 'all', label: '全部' },
-                        { value: 'win', label: '盈利' },
-                        { value: 'loss', label: '亏损' },
-                        { value: 'flat', label: '平盘' }
-                      ]}
-                    />
-                  </div>
-                  <div className="field-group">
-                    <span className="form-label">排序</span>
-                    <SegmentedControl
-                      value={recordFilters.sort}
-                      onChange={(value) => setRecordFilters((current) => ({ ...current, sort: value }))}
-                      ownerLabel="record-sort"
-                      className="mini-toggle block"
-                      compact
-                      options={[
-                        { value: 'desc', label: '最新' },
-                        { value: 'oldest', label: '最早' },
-                        { value: 'profit', label: '波动' }
-                      ]}
-                    />
-                  </div>
-                  <div className="field-group">
-                    <span className="form-label">密度</span>
-                    <SegmentedControl
-                      value={recordFilters.compact ? 'compact' : 'comfortable'}
-                      onChange={(value) => setRecordFilters((current) => ({ ...current, compact: value === 'compact' }))}
-                      ownerLabel="record-density"
-                      className="mini-toggle block"
-                      compact
-                      options={[
-                        { value: 'comfortable', label: '舒适' },
-                        { value: 'compact', label: '紧凑' }
-                      ]}
-                    />
-                  </div>
-                </div>
-                {hasActiveRecordFilters ? (
-                  <div className="filter-badge-wrap">
-                    {recordFilterBadges.map((badge) => (
-                      <StatusBadge key={badge.label} tone={badge.tone}>{badge.label}</StatusBadge>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="empty-desc">当前没有额外筛选，显示该视角下的全部交易日。</p>
-                )}
-                <div className="settings-actions">
+                <div className="records-pagination-controls">
                   <button
                     type="button"
-                    className="ghost-btn"
-                    onClick={() => {
-                      setRecordFilters({ ...DEFAULT_RECORD_FILTERS });
-                      setRecordsPage(0);
-                    }}
+                    className="ghost-btn pagination-btn"
+                    disabled={!totalRecordPages || safeRecordsPage <= 0}
+                    onClick={() => setRecordsPage((current) => Math.max(0, current - 1))}
                   >
-                    清空筛选
+                    上一页
                   </button>
                   <button
                     type="button"
-                    className="secondary-btn"
-                    onClick={() => {
-                      setRecordFilters((current) => ({ ...current, sort: 'desc' }));
-                      setRecordsPage(0);
-                    }}
+                    className="ghost-btn pagination-btn"
+                    disabled={!totalRecordPages || safeRecordsPage >= totalRecordPages - 1}
+                    onClick={() => setRecordsPage((current) => Math.min(totalRecordPages - 1, current + 1))}
                   >
-                    回到最新
+                    下一页
                   </button>
                 </div>
-              </aside>
-
-              <div className="records-main-stack">
-                <section className="card results-hero-card">
-                  <div className="results-hero-grid">
-                    <article className="overview-card compact">
-                      <span className="overview-label">筛选收益</span>
-                      <strong className={`overview-value ${getValueTone(filteredRecordSummary.totalProfit)}`}>
-                        {formatMoney(filteredRecordSummary.totalProfit)}
-                      </strong>
-                      <span className="overview-meta">命中 {filteredRecordDays.length} 个交易日</span>
-                    </article>
-                    <article className="overview-card compact">
-                      <span className="overview-label">交易笔数</span>
-                      <strong className="overview-value">{filteredRecordSummary.tradeCount}</strong>
-                      <span className="overview-meta">当前页前先看整体工作量</span>
-                    </article>
-                    <article className="overview-card compact">
-                      <span className="overview-label">盈利 / 亏损日</span>
-                      <strong className="overview-value">{filteredRecordSummary.winDays} / {filteredRecordSummary.lossDays}</strong>
-                      <span className="overview-meta">按日统计当前筛选结果</span>
-                    </article>
-                    <article className="overview-card compact">
-                      <span className="overview-label">筛选分红</span>
-                      <strong className={`overview-value ${getValueTone(filteredRecordSummary.dividend)}`}>
-                        {formatMoney(filteredRecordSummary.dividend)}
-                      </strong>
-                      <span className="overview-meta">仅统计当前命中的交易日</span>
-                    </article>
-                  </div>
-                </section>
-
-                <section className="card">
-                  <div className="records-toolbar">
-                    <div className="records-page-meta">
-                      {totalRecordPages ? `第 ${safeRecordsPage + 1} / ${totalRecordPages} 页 · 共 ${filteredRecordDays.length} 个交易日` : '共 0 页'}
-                    </div>
-                    <div className="records-pagination-controls">
-                      <button
-                        type="button"
-                        className="ghost-btn pagination-btn"
-                        disabled={!totalRecordPages || safeRecordsPage <= 0}
-                        onClick={() => setRecordsPage((current) => Math.max(0, current - 1))}
-                      >
-                        上一页
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-btn pagination-btn"
-                        disabled={!totalRecordPages || safeRecordsPage >= totalRecordPages - 1}
-                        onClick={() => setRecordsPage((current) => Math.min(totalRecordPages - 1, current + 1))}
-                      >
-                        下一页
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="records-list">
-                    {!visibleRecordDays.length ? (
-                      <div className="empty-state">
-                        <div className="empty-icon">📄</div>
-                        <div className="empty-title">这个范围还没有记录</div>
-                        <div className="empty-desc">切换筛选条件，或者先去设置页上传 CSV / 手动录入。</div>
-                      </div>
-                    ) : visibleRecordDays.map((day) => (
-                      <RecordDayCard
-                        key={day.id}
-                        day={day}
-                        scope={dashboardScope}
-                        compact={recordFilters.compact}
-                        onOpen={openEditSheet}
-                      />
-                    ))}
-                  </div>
-                </section>
               </div>
-            </div>
+
+              <div className="records-list">
+                {!visibleRecordDays.length ? (
+                  <div className="empty-state">
+                    <div className="empty-icon">📄</div>
+                    <div className="empty-title">没有记录</div>
+                  </div>
+                ) : visibleRecordDays.map((day) => (
+                  <RecordDayCard
+                    key={day.id}
+                    day={day}
+                    scope={dashboardScope}
+                    compact={recordFilters.compact}
+                    onOpen={openEditSheet}
+                  />
+                ))}
+              </div>
+            </section>
           </div>
         ) : null}
 
         {activeTab === 'analysis' ? (
           <div className="app-page tab-page">
-            <section className="page-hero">
-              <div className="page-hero-main">
-                <div>
-                  <div className="section-kicker">分析</div>
-                  <h1>不只看赚多少，也看怎么赚</h1>
-                  <p>把收益、行为、回撤、交易节奏和标的贡献放在同一个工作台里。</p>
-                </div>
-                <div className="page-hero-toolbar single">
-                  <ScopeToggle value={analysisScope} onChange={setAnalysisScope} ownerLabel="analysis" />
+            <AppTopBar
+              title="分析"
+              meta={`${analysisSummary.tradeCount} 笔`}
+              trailing={<strong className={getValueTone(analysisSummary.totalProfit)}>{formatMoney(analysisSummary.totalProfit)}</strong>}
+            >
+              <div className="topbar-toolbar">
+                <ScopeToggle value={analysisScope} onChange={setAnalysisScope} ownerLabel="analysis" />
+              </div>
+              <SegmentedControl
+                value={analysisPanel}
+                onChange={setAnalysisPanel}
+                ownerLabel="analysis-panel"
+                className="panel-switcher"
+                options={[
+                  { value: 'metrics', label: '指标' },
+                  { value: 'positions', label: '持仓' },
+                  { value: 'ranking', label: '排行' },
+                  { value: 'monthly', label: '月度' }
+                ]}
+              />
+            </AppTopBar>
+
+            {analysisPanel === 'metrics' ? (
+              <div className="panel-stack">
+                <section className="card analysis-hero-card">
+                  <div className="analysis-hero-grid">
+                    <div className="analysis-hero-main">
+                      <span className="summary-label">总收益</span>
+                      <strong className={`mega-profit ${getValueTone(analysisSummary.totalProfit)}`}>
+                        {formatMoney(analysisSummary.totalProfit, { signed: false })}
+                      </strong>
+                    </div>
+                    <div className="analysis-hero-side">
+                      <article className="mini-stat highlight">
+                        <span>按日胜率</span>
+                        <strong>{formatPercent(analysisSummary.winRate)}</strong>
+                      </article>
+                      <article className="mini-stat">
+                        <span>按笔胜率</span>
+                        <strong>{formatPercent(analysisDiagnostics.tradeWinRate)}</strong>
+                      </article>
+                      <article className="mini-stat">
+                        <span>回撤</span>
+                        <strong className="negative">{formatMoney(analysisDiagnostics.maxDrawdown, { signed: false })}</strong>
+                      </article>
+                      <article className="mini-stat">
+                        <span>在仓</span>
+                        <strong>{analysisSummary.positionsCount}</strong>
+                      </article>
+                    </div>
+                  </div>
+                </section>
+
+                <div className="panel-grid two">
+                  <section className="card diagnostics-card">
+                    <div className="section-kicker">行为</div>
+                    <h2>交易诊断</h2>
+                    <div className="stats-table">
+                      <div className="stats-row">
+                        <span>平均单笔</span>
+                        <strong>{formatMoney(analysisDiagnostics.avgPerClose)}</strong>
+                      </div>
+                      <div className="stats-row">
+                        <span>平均盈利</span>
+                        <strong className="positive">{formatMoney(analysisDiagnostics.avgWin)}</strong>
+                      </div>
+                      <div className="stats-row">
+                        <span>平均亏损</span>
+                        <strong className="negative">{formatMoney(analysisDiagnostics.avgLoss)}</strong>
+                      </div>
+                      <div className="stats-row">
+                        <span>盈亏比</span>
+                        <strong>{analysisDiagnostics.profitFactor ? analysisDiagnostics.profitFactor.toFixed(2) : '0.00'}</strong>
+                      </div>
+                      <div className="stats-row">
+                        <span>连胜 / 连亏</span>
+                        <strong>{analysisDiagnostics.maxWinStreak} / {analysisDiagnostics.maxLossStreak}</strong>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="card diagnostics-card">
+                    <div className="section-kicker">节奏</div>
+                    <h2>频率</h2>
+                    <div className="stats-table">
+                      <div className="stats-row">
+                        <span>交易笔数</span>
+                        <strong>{analysisSummary.tradeCount}</strong>
+                      </div>
+                      <div className="stats-row">
+                        <span>日均交易</span>
+                        <strong>{analysisSummary.activeDays ? (analysisSummary.tradeCount / analysisSummary.activeDays).toFixed(1) : '0'}</strong>
+                      </div>
+                      <div className="stats-row">
+                        <span>最佳月份</span>
+                        <strong className={monthlyHighlights.best ? getValueTone(monthlyHighlights.best.profit) : 'neutral'}>
+                          {monthlyHighlights.best ? `${monthlyHighlights.best.month.replace('-', '/')} · ${formatMoney(monthlyHighlights.best.profit)}` : '--'}
+                        </strong>
+                      </div>
+                      <div className="stats-row">
+                        <span>最佳单日</span>
+                        <strong className={analysisExtremes.best ? getValueTone(analysisExtremes.best.scopes[analysisScope].profit) : 'neutral'}>
+                          {analysisExtremes.best ? `${formatDateParts(analysisExtremes.best.date).label} · ${formatMoney(analysisExtremes.best.scopes[analysisScope].profit)}` : '--'}
+                        </strong>
+                      </div>
+                      <div className="stats-row">
+                        <span>融资成本</span>
+                        <strong className="negative">{formatMoney(analysisSummary.financingCost, { signed: false })}</strong>
+                      </div>
+                    </div>
+                  </section>
                 </div>
               </div>
-            </section>
+            ) : null}
 
-            <section className="card analysis-hero-card">
-              <div className="analysis-hero-grid">
-                <div className="analysis-hero-main">
-                  <span className="summary-label">总收益</span>
-                  <strong className={`mega-profit ${getValueTone(analysisSummary.totalProfit)}`}>
-                    {formatMoney(analysisSummary.totalProfit, { signed: false })}
-                  </strong>
-                  <p className="summary-note">
-                    当前视角覆盖 {analysisSummary.tradeCount} 笔交易，已实现 {analysisDiagnostics.closeTradeCount} 笔。
-                  </p>
-                </div>
-                <div className="analysis-hero-side">
-                  <article className="mini-stat highlight">
-                    <span>按日胜率</span>
-                    <strong>{formatPercent(analysisSummary.winRate)}</strong>
-                  </article>
-                  <article className="mini-stat">
-                    <span>按笔胜率</span>
-                    <strong>{formatPercent(analysisDiagnostics.tradeWinRate)}</strong>
-                  </article>
-                  <article className="mini-stat">
-                    <span>最大回撤</span>
-                    <strong className="negative">{formatMoney(analysisDiagnostics.maxDrawdown, { signed: false })}</strong>
-                  </article>
-                  <article className="mini-stat">
-                    <span>当前在仓</span>
-                    <strong>{analysisSummary.positionsCount}</strong>
-                  </article>
-                </div>
-              </div>
-            </section>
-
-            <div className="analysis-layout">
-              <section className="card diagnostics-card">
-                <div className="section-kicker">交易诊断</div>
-                <h2>行为指标</h2>
-                <div className="stats-table">
-                  <div className="stats-row">
-                    <span>平均单笔已实现收益</span>
-                    <strong>{formatMoney(analysisDiagnostics.avgPerClose)}</strong>
-                  </div>
-                  <div className="stats-row">
-                    <span>平均盈利交易</span>
-                    <strong className="positive">{formatMoney(analysisDiagnostics.avgWin)}</strong>
-                  </div>
-                  <div className="stats-row">
-                    <span>平均亏损交易</span>
-                    <strong className="negative">{formatMoney(analysisDiagnostics.avgLoss)}</strong>
-                  </div>
-                  <div className="stats-row">
-                    <span>盈亏比</span>
-                    <strong>{analysisDiagnostics.profitFactor ? analysisDiagnostics.profitFactor.toFixed(2) : '0.00'}</strong>
-                  </div>
-                  <div className="stats-row">
-                    <span>最长连胜 / 连亏</span>
-                    <strong>{analysisDiagnostics.maxWinStreak} / {analysisDiagnostics.maxLossStreak} 天</strong>
-                  </div>
-                  <div className="stats-row">
-                    <span>盈利笔数 / 亏损笔数</span>
-                    <strong>{analysisDiagnostics.winTradeCount} / {analysisDiagnostics.lossTradeCount}</strong>
-                  </div>
-                </div>
-              </section>
-
-              <section className="card diagnostics-card">
-                <div className="section-kicker">节奏统计</div>
-                <h2>交易频率与高低点</h2>
-                <div className="stats-table">
-                  <div className="stats-row">
-                    <span>总交易笔数</span>
-                    <strong>{analysisSummary.tradeCount}</strong>
-                  </div>
-                  <div className="stats-row">
-                    <span>平均每日交易</span>
-                    <strong>{analysisSummary.activeDays ? (analysisSummary.tradeCount / analysisSummary.activeDays).toFixed(1) : '0'}</strong>
-                  </div>
-                  <div className="stats-row">
-                    <span>最佳月份</span>
-                    <strong className={monthlyHighlights.best ? getValueTone(monthlyHighlights.best.profit) : 'neutral'}>
-                      {monthlyHighlights.best ? `${monthlyHighlights.best.month.replace('-', '/')} · ${formatMoney(monthlyHighlights.best.profit)}` : '暂无'}
-                    </strong>
-                  </div>
-                  <div className="stats-row">
-                    <span>最弱月份</span>
-                    <strong className={monthlyHighlights.worst ? getValueTone(monthlyHighlights.worst.profit) : 'neutral'}>
-                      {monthlyHighlights.worst ? `${monthlyHighlights.worst.month.replace('-', '/')} · ${formatMoney(monthlyHighlights.worst.profit)}` : '暂无'}
-                    </strong>
-                  </div>
-                  <div className="stats-row">
-                    <span>最佳单日</span>
-                    <strong className={analysisExtremes.best ? getValueTone(analysisExtremes.best.scopes[analysisScope].profit) : 'neutral'}>
-                      {analysisExtremes.best ? `${formatDateParts(analysisExtremes.best.date).label} · ${formatMoney(analysisExtremes.best.scopes[analysisScope].profit)}` : '暂无'}
-                    </strong>
-                  </div>
-                  <div className="stats-row">
-                    <span>累计融资成本</span>
-                    <strong className="negative">{formatMoney(analysisSummary.financingCost, { signed: false })}</strong>
-                  </div>
-                </div>
-              </section>
-
+            {analysisPanel === 'positions' ? (
               <section className="card">
                 <div className="card-header">
                   <div>
                     <div className="section-kicker">当前在仓</div>
-                    <h2>仓位面板</h2>
+                    <h2>持仓</h2>
                   </div>
                 </div>
                 <div className="stack-list">
@@ -2183,12 +2153,14 @@ export function App() {
                     )}
                 </div>
               </section>
+            ) : null}
 
+            {analysisPanel === 'ranking' ? (
               <section className="card">
                 <div className="card-header">
                   <div>
                     <div className="section-kicker">盈亏排行</div>
-                    <h2>股票贡献度</h2>
+                    <h2>贡献度</h2>
                   </div>
                 </div>
                 {(bestStock || worstStock) ? (
@@ -2196,19 +2168,15 @@ export function App() {
                     {bestStock ? (
                       <article className="overview-card compact">
                         <span className="overview-label">最大正贡献</span>
-                        <strong className={`overview-value ${getValueTone(bestStock.profit)}`}>
-                          {getStockDisplayName(bestStock.symbol, bestStock.name)}
-                        </strong>
-                        <span className="overview-meta">{formatMoney(bestStock.profit)} · 共 {bestStock.tradeCount} 笔</span>
+                        <strong className={`overview-value ${getValueTone(bestStock.profit)}`}>{getStockDisplayName(bestStock.symbol, bestStock.name)}</strong>
+                        <span className="overview-meta">{formatMoney(bestStock.profit)}</span>
                       </article>
                     ) : null}
                     {worstStock ? (
                       <article className="overview-card compact">
                         <span className="overview-label">最大负贡献</span>
-                        <strong className={`overview-value ${getValueTone(worstStock.profit)}`}>
-                          {getStockDisplayName(worstStock.symbol, worstStock.name)}
-                        </strong>
-                        <span className="overview-meta">{formatMoney(worstStock.profit)} · 共 {worstStock.tradeCount} 笔</span>
+                        <strong className={`overview-value ${getValueTone(worstStock.profit)}`}>{getStockDisplayName(worstStock.symbol, worstStock.name)}</strong>
+                        <span className="overview-meta">{formatMoney(worstStock.profit)}</span>
                       </article>
                     ) : null}
                   </div>
@@ -2235,12 +2203,14 @@ export function App() {
                   )}
                 </div>
               </section>
+            ) : null}
 
+            {analysisPanel === 'monthly' ? (
               <section className="card analysis-chart-card">
                 <div className="card-header">
                   <div>
                     <div className="section-kicker">月度收益</div>
-                    <h2>按月看波动</h2>
+                    <h2>月度</h2>
                   </div>
                 </div>
                 <div className="chart-box monthly">
@@ -2276,68 +2246,58 @@ export function App() {
                   />
                 </div>
               </section>
-            </div>
+            ) : null}
           </div>
         ) : null}
 
         {activeTab === 'dividend' ? (
           <div className="app-page tab-page">
-            <section className="page-hero">
-              <div className="page-hero-main">
-                <div>
-                  <div className="section-kicker">分红</div>
-                  <h1>把分红规则做成特色模块</h1>
-                  <p>区分现物和信用，也把规则快照、历史分红和留存关系拆得更清楚。</p>
-                </div>
-                <div className="page-hero-toolbar single">
-                  <ScopeToggle value={dividendScope} onChange={setDividendScope} ownerLabel="dividend" />
-                </div>
+            <AppTopBar
+              title="分红"
+              meta={`起始 ${DIVIDEND_START_DATE}`}
+              trailing={<strong className={getValueTone(dividendSummary.netDividend)}>{formatMoney(dividendSummary.netDividend)}</strong>}
+            >
+              <div className="topbar-toolbar">
+                <ScopeToggle value={dividendScope} onChange={setDividendScope} ownerLabel="dividend" />
               </div>
-            </section>
+              <SegmentedControl
+                value={dividendPanel}
+                onChange={setDividendPanel}
+                ownerLabel="dividend-panel"
+                className="panel-switcher"
+                options={[
+                  { value: 'summary', label: '汇总' },
+                  { value: 'history', label: '历史' },
+                  { value: 'rules', label: '规则' }
+                ]}
+              />
+            </AppTopBar>
 
-            <section className="notice-banner">
-              <strong>统计口径：</strong> 仅统计从 {DIVIDEND_START_DATE} 起新增或平仓后产生的分红。
-            </section>
-
-            <div className="dividend-layout">
-              <div className="dividend-main-stack">
+            {dividendPanel === 'summary' ? (
+              <div className="panel-stack">
                 <section className="card dividend-hero-card">
-                  <div className="hero-overview-head">
-                    <div>
-                      <div className="section-kicker">净分红</div>
-                      <h2>{getScopeLabel(dividendScope)}视角</h2>
-                    </div>
-                    <StatusBadge tone={getValueTone(dividendSummary.netDividend)}>
-                      当前净分红 {formatMoney(dividendSummary.netDividend)}
-                    </StatusBadge>
-                  </div>
                   <div className="hero-overview-grid">
                     <div className="hero-overview-primary">
                       <span className="summary-label">净分红</span>
                       <strong className={`mega-profit ${getValueTone(dividendSummary.netDividend)}`}>
                         {formatMoney(dividendSummary.netDividend)}
                       </strong>
-                      <p className="summary-note">累计分红减去累计分担亏损后得到的净结果。</p>
                     </div>
                     <div className="hero-overview-metrics">
                       <article className="mini-stat highlight">
-                        <span>今日分红</span>
-                        <strong className={getValueTone(dividendSummary.today.dividend)}>
-                          {formatMoney(dividendSummary.today.dividend)}
-                        </strong>
+                        <span>今日</span>
+                        <strong className={getValueTone(dividendSummary.today.dividend)}>{formatMoney(dividendSummary.today.dividend)}</strong>
                       </article>
                       <article className="mini-stat">
-                        <span>本周分红</span>
-                        <strong className={getValueTone(dividendSummary.week.dividend)}>
-                          {formatMoney(dividendSummary.week.dividend)}
-                        </strong>
+                        <span>本周</span>
+                        <strong className={getValueTone(dividendSummary.week.dividend)}>{formatMoney(dividendSummary.week.dividend)}</strong>
                       </article>
                       <article className="mini-stat">
                         <span>累计分红</span>
                         <strong>{formatMoney(dividendSummary.totalDividend, { signed: false })}</strong>
                       </article>
                       <article className="mini-stat">
-                        <span>累计分担亏损</span>
+                        <span>累计分担</span>
                         <strong className="negative">{formatMoney(dividendSummary.totalLossShare, { signed: false })}</strong>
                       </article>
                     </div>
@@ -2347,8 +2307,8 @@ export function App() {
                 <section className="card">
                   <div className="card-header">
                     <div>
-                      <div className="section-kicker">最近一次结果</div>
-                      <h2>分红前后对照</h2>
+                      <div className="section-kicker">最近一次</div>
+                      <h2>结算</h2>
                     </div>
                   </div>
                   {latestDividendEntry ? (
@@ -2358,15 +2318,15 @@ export function App() {
                         <strong>{formatDateParts(latestDividendEntry.date).fullLabel}</strong>
                       </div>
                       <div className="stats-row">
-                        <span>分红前收益</span>
+                        <span>分红前</span>
                         <strong className={getValueTone(latestDividendEntry.profit)}>{formatMoney(latestDividendEntry.profit)}</strong>
                       </div>
                       <div className="stats-row">
-                        <span>分红结果</span>
+                        <span>分红</span>
                         <strong className={getValueTone(latestDividendEntry.dividend)}>{formatMoney(latestDividendEntry.dividend)}</strong>
                       </div>
                       <div className="stats-row emphasis">
-                        <span>分红后留存</span>
+                        <span>留存</span>
                         <strong className={getValueTone(latestDividendEntry.profit - latestDividendEntry.dividend)}>
                           {formatMoney(latestDividendEntry.profit - latestDividendEntry.dividend)}
                         </strong>
@@ -2375,58 +2335,57 @@ export function App() {
                   ) : (
                     <div className="empty-state">
                       <div className="empty-icon">🎀</div>
-                      <div className="empty-title">还没有分红历史</div>
+                      <div className="empty-title">还没有分红</div>
                     </div>
                   )}
                 </section>
-
-                <section className="card">
-                  <div className="card-header">
-                    <div>
-                      <div className="section-kicker">分红历史</div>
-                      <h2>分红历史（2026年度起）</h2>
-                    </div>
-                  </div>
-                  <div className="stack-list">
-                    {dividendSummary.dividendHistory.length ? dividendSummary.dividendHistory.map((item) => (
-                      <article className="history-card" key={item.date}>
-                        <div className="history-head">
-                          <div>
-                            <div className="trade-title">{formatDateParts(item.date).fullLabel}</div>
-                            <div className="trade-subline">分红前收益 {formatMoney(item.profit)}</div>
-                          </div>
-                          <div className={`dividend-amount ${getValueTone(item.dividend)}`}>
-                            {formatMoney(item.dividend)}
-                          </div>
-                        </div>
-                        <div className="history-metric-row">
-                          <span>分红后留存</span>
-                          <strong className={getValueTone(item.profit - item.dividend)}>
-                            {formatMoney(item.profit - item.dividend)}
-                          </strong>
-                        </div>
-                        <div className="meta-chips">
-                          <span className="chip">总分红 {formatMoney(item.dividend)}</span>
-                          {dividendScope === 'all' ? <span className="chip">现物 {formatMoney(item.cashDividend)}</span> : null}
-                          {dividendScope === 'all' ? <span className="chip">信用 {formatMoney(item.marginDividend)}</span> : null}
-                        </div>
-                      </article>
-                    )) : (
-                      <div className="empty-state">
-                        <div className="empty-icon">🎀</div>
-                        <div className="empty-title">还没有分红历史</div>
-                      </div>
-                    )}
-                  </div>
-                </section>
               </div>
+            ) : null}
 
-              <div className="dividend-side-stack">
+            {dividendPanel === 'history' ? (
+              <section className="card">
+                <div className="card-header">
+                  <div>
+                    <div className="section-kicker">分红历史</div>
+                    <h2>历史</h2>
+                  </div>
+                </div>
+                <div className="stack-list">
+                  {dividendSummary.dividendHistory.length ? dividendSummary.dividendHistory.map((item) => (
+                    <article className="history-card" key={item.date}>
+                      <div className="history-head">
+                        <div>
+                          <div className="trade-title">{formatDateParts(item.date).fullLabel}</div>
+                          <div className="trade-subline">分红前 {formatMoney(item.profit)}</div>
+                        </div>
+                        <div className={`dividend-amount ${getValueTone(item.dividend)}`}>{formatMoney(item.dividend)}</div>
+                      </div>
+                      <div className="history-metric-row">
+                        <span>留存</span>
+                        <strong className={getValueTone(item.profit - item.dividend)}>{formatMoney(item.profit - item.dividend)}</strong>
+                      </div>
+                      <div className="meta-chips">
+                        {dividendScope === 'all' ? <span className="chip">现物 {formatMoney(item.cashDividend)}</span> : null}
+                        {dividendScope === 'all' ? <span className="chip">信用 {formatMoney(item.marginDividend)}</span> : null}
+                      </div>
+                    </article>
+                  )) : (
+                    <div className="empty-state">
+                      <div className="empty-icon">🎀</div>
+                      <div className="empty-title">还没有分红</div>
+                    </div>
+                  )}
+                </div>
+              </section>
+            ) : null}
+
+            {dividendPanel === 'rules' ? (
+              <div className="panel-grid two">
                 <section className="card">
                   <div className="card-header">
                     <div>
                       <div className="section-kicker">规则快照</div>
-                      <h2>现行比例</h2>
+                      <h2>比例</h2>
                     </div>
                   </div>
                   <div className="ratio-grid">
@@ -2440,11 +2399,8 @@ export function App() {
                             </span>
                             <strong className="ratio-value">{rule.numerator} / {rule.denominator}</strong>
                           </div>
-                          <p className="ratio-meta">
-                            新交易会套用这个比例 · {formatDateParts(rule.updatedAt || todayStr()).fullLabel}
-                          </p>
                           <button type="button" className="secondary-btn" onClick={() => openRatioEditor(target)}>
-                            修改分红比例
+                            修改
                           </button>
                         </article>
                       );
@@ -2456,118 +2412,102 @@ export function App() {
                   <div className="card-header">
                     <div>
                       <div className="section-kicker">规则说明</div>
-                      <h2>当前结算方式</h2>
+                      <h2>说明</h2>
                     </div>
                   </div>
                   <div className="insight-list">
                     <article className="insight-card compact">
-                      <span className="insight-label">现物比例</span>
+                      <span className="insight-label">现物</span>
                       <strong>{snapshot.settings.dividendRules.cash.numerator} / {snapshot.settings.dividendRules.cash.denominator}</strong>
-                      <span className="insight-note">正收益按比例分红，负收益按比例分担亏损。</span>
                     </article>
                     <article className="insight-card compact">
-                      <span className="insight-label">信用比例</span>
+                      <span className="insight-label">信用</span>
                       <strong>{snapshot.settings.dividendRules.margin.numerator} / {snapshot.settings.dividendRules.margin.denominator}</strong>
-                      <span className="insight-note">融资成本已先计入信用收益，再计算分红快照。</span>
                     </article>
                     <article className="insight-card compact">
-                      <span className="insight-label">历史处理</span>
-                      <strong>不回溯旧规则</strong>
-                      <span className="insight-note">修改比例后，只影响后续新增交易；旧记录沿用各自快照。</span>
+                      <span className="insight-label">历史</span>
+                      <strong>不回溯</strong>
                     </article>
                   </div>
                 </section>
               </div>
-            </div>
+            ) : null}
           </div>
         ) : null}
 
         {activeTab === 'settings' ? (
           <div className="app-page tab-page">
-            <section className="page-hero">
-              <div className="page-hero-main">
-                <div>
-                  <div className="section-kicker">设置</div>
-                  <h1>录入、同步、清理都分区收好</h1>
-                  <p>把高频动作单独摆出来，把开发味太重的配置收进高级区，把危险操作彻底隔开。</p>
-                </div>
-                <div className="page-hero-side compact">
-                  <div className="hero-account-card">
-                    <span>版本</span>
-                    <strong>v{snapshot.version}</strong>
-                  </div>
-                  <div className="hero-account-card">
-                    <span>云状态</span>
-                    <strong>{snapshot.firebase.isSignedIn ? currentAccountLabel : '未登录'}</strong>
-                  </div>
-                </div>
-              </div>
-            </section>
+            <AppTopBar
+              title="设置"
+              meta={`v${snapshot.version}`}
+              trailing={<StatusBadge tone={snapshot.firebase.isSignedIn ? 'success' : 'warning'}>{snapshot.firebase.isSignedIn ? '已连接' : '未连接'}</StatusBadge>}
+            >
+              <SegmentedControl
+                value={settingsPanel}
+                onChange={setSettingsPanel}
+                ownerLabel="settings-panel"
+                className="panel-switcher"
+                options={[
+                  { value: 'data', label: '数据' },
+                  { value: 'sync', label: '同步' },
+                  { value: 'advanced', label: '高级' },
+                  { value: 'danger', label: '危险' }
+                ]}
+              />
+            </AppTopBar>
 
-            <div className="settings-layout">
+            {settingsPanel === 'data' ? (
               <section className="card settings-card-large">
-                <div className="card-header">
-                  <div>
-                    <div className="section-kicker">录入与导入</div>
-                    <h2>高频入口</h2>
-                  </div>
-                </div>
                 <div className="settings-overview-grid">
                   <article className="status-card">
                     <span className="status-card-label">手动录入</span>
                     <strong className="status-card-value">按交易日追加</strong>
-                    <p className="settings-note">支持现物 / 信用、买卖 / 开平仓、更多附加字段和当天合并保存。</p>
                   </article>
                   <article className="status-card">
-                    <span className="status-card-label">CSV 数据</span>
+                    <span className="status-card-label">CSV</span>
                     <strong className="status-card-value">
-                      {snapshot.settings.lastCsvImportAt ? `最近导入 ${formatDateParts(snapshot.settings.lastCsvImportAt).label}` : '还没有导入 CSV'}
+                      {snapshot.settings.lastCsvImportAt ? `最近 ${formatDateParts(snapshot.settings.lastCsvImportAt).label}` : '还没有导入'}
                     </strong>
                     <p className="settings-note">
                       {snapshot.settings.lastCsvImportSummary
-                        ? `最近一次共读取 ${snapshot.settings.lastCsvImportSummary.totalRows} 行，导入 ${snapshot.settings.lastCsvImportSummary.importedRows} 行，忽略投信 ${snapshot.settings.lastCsvImportSummary.skippedInvestmentTrust} 行。`
-                        : '支持券商约定履历 CSV；只导入株式現物和信用数据，并会用最新 CSV 重建券商记录。'}
+                        ? `导入 ${snapshot.settings.lastCsvImportSummary.importedRows} 行`
+                        : '支持券商 CSV'}
                     </p>
                   </article>
                 </div>
                 <div className="settings-actions">
-                  <button type="button" className="primary-btn wide-btn" onClick={openAddSheet}>手动录入交易</button>
-                  <button type="button" className="secondary-btn wide-btn" onClick={() => csvInputRef.current?.click()}>上传券商 CSV</button>
+                  <button type="button" className="primary-btn wide-btn" onClick={openAddSheet}>手动录入</button>
+                  <button type="button" className="secondary-btn wide-btn" onClick={() => csvInputRef.current?.click()}>上传 CSV</button>
                 </div>
               </section>
+            ) : null}
 
+            {settingsPanel === 'sync' ? (
               <section className="card settings-card-large">
-                <div className="card-header">
-                  <div>
-                    <div className="section-kicker">云同步（Firebase）</div>
-                    <h2>账号与推拉策略</h2>
-                  </div>
-                </div>
                 <div className="sync-rule-card">
                   <div className="sync-rule-row">
-                    <strong>上传到云端</strong>
-                    <span>以本地为准覆盖云端</span>
+                    <strong>上传</strong>
+                    <span>本地覆盖云端</span>
                   </div>
                   <div className="sync-rule-row">
-                    <strong>从云端拉取</strong>
-                    <span>以云端为准覆盖本地</span>
+                    <strong>拉取</strong>
+                    <span>云端覆盖本地</span>
                   </div>
                 </div>
                 <div className="settings-overview-grid">
                   <article className="status-card">
-                    <span className="status-card-label">当前云账号</span>
-                    <strong className="status-card-value">{snapshot.firebase.isSignedIn ? currentAccountLabel : '尚未登录'}</strong>
-                    <p className="settings-note">{snapshot.firebase.authStatusText}</p>
+                    <span className="status-card-label">账号</span>
+                    <strong className="status-card-value">{snapshot.firebase.isSignedIn ? currentAccountLabel : '未登录'}</strong>
+                    <p className="settings-note">{snapshot.firebase.syncStatusText}</p>
                   </article>
                   <article className="status-card">
-                    <span className="status-card-label">同步状态</span>
-                    <strong className="status-card-value">{snapshot.firebase.syncStatusText}</strong>
-                    <p className="settings-note">同步中会锁定推拉按钮，避免覆盖冲突。</p>
+                    <span className="status-card-label">状态</span>
+                    <strong className="status-card-value">{snapshot.firebase.authStatusText}</strong>
                   </article>
                 </div>
                 <div className="settings-actions">
                   <button type="button" className="primary-btn" onClick={() => handleCloudAction('login')}>
-                    {snapshot.firebase.isSignedIn ? '重新选择 Google 账号' : 'Google 登录'}
+                    {snapshot.firebase.isSignedIn ? '切换账号' : 'Google 登录'}
                   </button>
                   <button type="button" className="ghost-btn" disabled={!snapshot.firebase.isSignedIn} onClick={() => handleCloudAction('logout')}>
                     退出
@@ -2575,31 +2515,27 @@ export function App() {
                 </div>
                 <div className="settings-actions">
                   <button type="button" className="primary-btn" disabled={!snapshot.firebase.isSignedIn || snapshot.firebase.isSyncing} onClick={() => handleCloudAction('push')}>
-                    上传到云端
+                    上传
                   </button>
                   <button type="button" className="ghost-btn" disabled={!snapshot.firebase.isSignedIn || snapshot.firebase.isSyncing} onClick={() => handleCloudAction('pull')}>
-                    从云端拉取
+                    拉取
                   </button>
                 </div>
               </section>
+            ) : null}
 
+            {settingsPanel === 'advanced' ? (
               <section className="card settings-card-large">
-                <div className="card-header">
-                  <div>
-                    <div className="section-kicker">健康与高级配置</div>
-                    <h2>当前状态</h2>
-                  </div>
-                </div>
                 <div className="settings-overview-grid">
                   <article className="status-card">
                     <span className="status-card-label">数据健康</span>
                     <strong className="status-card-value">{healthReport.duplicateCount + healthReport.orphanCloseCount ? '需要关注' : '状态良好'}</strong>
-                    <p className="settings-note">重复 {healthReport.duplicateCount} 条，未匹配平仓 {healthReport.orphanCloseCount} 条。</p>
+                    <p className="settings-note">重复 {healthReport.duplicateCount}，未匹配 {healthReport.orphanCloseCount}</p>
                   </article>
                   <article className="status-card">
                     <span className="status-card-label">Firebase 项目</span>
                     <strong className="status-card-value">{configPreview?.projectId || '未配置'}</strong>
-                    <p className="settings-note">{configPreview?.authDomain || '尚未填写 Firebase Web 配置。'}</p>
+                    <p className="settings-note">{configPreview?.authDomain || '未填写'}</p>
                   </article>
                 </div>
                 <button type="button" className="settings-inline-toggle" onClick={() => setShowAdvancedConfig((current) => !current)}>
@@ -2633,18 +2569,14 @@ export function App() {
                   </div>
                 ) : null}
               </section>
+            ) : null}
 
+            {settingsPanel === 'danger' ? (
               <section className="card settings-card-large danger-zone">
-                <div className="card-header">
-                  <div>
-                    <div className="section-kicker">危险操作</div>
-                    <h2>清除数据前先确认影响范围</h2>
-                  </div>
-                </div>
                 <button type="button" className="settings-item danger" onClick={() => setConfirmState({ open: true, mode: 'local' })}>
                   <div>
                     <strong>清除本地数据</strong>
-                    <p>清除当前设备上的交易记录和本地设置，不影响 Firebase 云端数据。</p>
+                    <p>不影响云端</p>
                   </div>
                   <span>›</span>
                 </button>
@@ -2656,17 +2588,30 @@ export function App() {
                 >
                   <div>
                     <strong>清除云端数据</strong>
-                    <p>清除 Firebase 云端中的交易记录和云端设置，不影响当前设备上的本地数据。</p>
+                    <p>不影响当前设备</p>
                   </div>
                   <span>›</span>
                 </button>
               </section>
-            </div>
+            ) : null}
           </div>
         ) : null}
       </div>
 
       <BottomNav activeTab={activeTab} onChange={setActiveTab} />
+      <RecordFilterSheet
+        open={recordFilterSheetOpen}
+        recordFilters={recordFilters}
+        setRecordFilters={setRecordFilters}
+        dashboardScope={dashboardScope}
+        setDashboardScope={setDashboardScope}
+        monthOptions={monthOptions}
+        onReset={() => {
+          setRecordFilters({ ...DEFAULT_RECORD_FILTERS });
+          setRecordsPage(0);
+        }}
+        onClose={() => setRecordFilterSheetOpen(false)}
+      />
       <ManualDaySheet
         state={manualSheet}
         snapshot={snapshot}
