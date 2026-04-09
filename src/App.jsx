@@ -21,6 +21,8 @@ import {
 import { Bar, Line } from 'react-chartjs-2';
 import {
   APP_VERSION,
+  CLOSE_VALUE_MODES,
+  COST_BASIS_METHODS,
   DIVIDEND_START_DATE,
   MANUAL_TYPE_MAP,
   RECORDS_PAGE_SIZE,
@@ -55,6 +57,7 @@ import {
   signOutFromFirebase,
   todayStr,
   trimText,
+  updateAccountingSettings,
   updateDividendRule,
   upsertManualDay,
   getTradeAppSnapshot
@@ -94,6 +97,10 @@ const EMPTY_SNAPSHOT = {
   settings: {
     lastCsvImportAt: '',
     lastCsvImportSummary: null,
+    accounting: {
+      costBasisMethod: COST_BASIS_METHODS.MOVING_AVERAGE,
+      closeValueMode: CLOSE_VALUE_MODES.PREFER_REPORTED
+    },
     dividendRules: {
       cash: { numerator: 1, denominator: 3, updatedAt: '' },
       margin: { numerator: 1, denominator: 3, updatedAt: '' }
@@ -138,6 +145,64 @@ function getTradeRealizedLabel(trade) {
   if (trade.realizedProfit > 0) return 'positive';
   if (trade.realizedProfit < 0) return 'negative';
   return 'neutral';
+}
+
+function getTradeProfitSourceLabel(trade) {
+  if (trade.profitSource === 'reported') return '券商';
+  if (trade.profitSource === 'manual') return '手工';
+  if (trade.profitSource === 'model') {
+    return trade.costBasisMethod === COST_BASIS_METHODS.FIFO ? 'FIFO' : '均价';
+  }
+  return '';
+}
+
+function getTradeProfitSourceTone(trade) {
+  if (trade.profitSource === 'reported') return 'success';
+  if (trade.profitSource === 'manual') return 'warning';
+  if (trade.profitSource === 'model') return 'neutral';
+  return 'neutral';
+}
+
+function getHoldingCostMeta(scopeDay) {
+  const confirmed = Number(scopeDay?.holdingCost) || 0;
+  const estimated = Number(scopeDay?.estimatedHoldingCost) || 0;
+  if (confirmed > 0) {
+    return { label: '持有成本', value: confirmed };
+  }
+  if (estimated > 0) {
+    return { label: '估算持有成本', value: estimated };
+  }
+  return { label: '持有成本', value: 0 };
+}
+
+function getManualSettlementFieldConfig(trade) {
+  if (trade.assetType === 'cash') {
+    return {
+      label: '受渡金额',
+      placeholder: trade.action === 'buy' ? '可留空让系统按买入成本估算' : '可留空让系统按卖出净额估算',
+      help: '现物会优先用受渡金额作为真实现金流。'
+    };
+  }
+  if (trade.positionEffect === 'close') {
+    return {
+      label: '券商决済损益',
+      placeholder: '填入券商实际净损益可优先作为精确值',
+      help: '信用平仓填写后，会优先作为这笔已实现净损益。'
+    };
+  }
+  return {
+    label: '参考金额',
+    placeholder: '非必填',
+    help: '信用开仓通常不需要填写。'
+  };
+}
+
+function getCostBasisMethodLabel(method) {
+  return method === COST_BASIS_METHODS.FIFO ? 'FIFO' : '移动均价';
+}
+
+function getCloseValueModeLabel(mode) {
+  return mode === CLOSE_VALUE_MODES.MODEL_ONLY ? '总是重算' : '优先券商';
 }
 
 function formatTradeQuantity(trade) {
@@ -710,6 +775,7 @@ function RecordDayCard({ day, scope, compact, onOpen }) {
   const symbols = Array.from(scopeDay.symbols || []).filter(Boolean).slice(0, compact ? 3 : 5);
   const parts = formatDateParts(day.date);
   const tone = getValueTone(scopeDay.profit);
+  const holdingCostMeta = getHoldingCostMeta(scopeDay);
 
   return (
     <details className={`record-card-react ${compact ? 'compact' : ''}`}>
@@ -746,7 +812,7 @@ function RecordDayCard({ day, scope, compact, onOpen }) {
         <div className="record-detail-meta">
           <span>已实现 {scopeDay.closeTradeCount} 笔</span>
           <span>分红 {formatMoney(scopeDay.dividend)}</span>
-          <span>融资成本 {formatMoney(scopeDay.financingCost, { signed: false })}</span>
+          <span>{holdingCostMeta.label} {formatMoney(holdingCostMeta.value, { signed: false })}</span>
           <span>交易标的 {Array.from(scopeDay.symbols || []).length}</span>
         </div>
         <div className="trade-list-compact">
@@ -760,6 +826,9 @@ function RecordDayCard({ day, scope, compact, onOpen }) {
                     <div className="trade-mini-badges">
                       <StatusBadge tone={getTradeBadgeTone(trade)}>{trade.assetType === 'margin' ? '信用' : '现物'}</StatusBadge>
                       <StatusBadge tone={trade.fingerprint ? 'success' : 'neutral'}>{getTradeSourceLabel(trade)}</StatusBadge>
+                      {getTradeProfitSourceLabel(trade) ? (
+                        <StatusBadge tone={getTradeProfitSourceTone(trade)}>{getTradeProfitSourceLabel(trade)}</StatusBadge>
+                      ) : null}
                     </div>
                   </div>
                   <div className="trade-row-sub">
@@ -879,6 +948,7 @@ function ManualDaySheet({
   onChangeDate,
   onUpdateTrade,
   onRemoveTrade,
+  onMoveTrade,
   onAddTrade,
   onDeleteDay,
   onSave
@@ -904,7 +974,7 @@ function ManualDaySheet({
   const preview = buildAnalytics(previewDays);
   const previewDay = preview.daysDesc.find((day) => day.date === (previewDate || todayStr()));
   const previewProfit = previewDay?.scopes.all.profit || 0;
-  const previewFinancing = previewDay?.scopes.all.financingCost || 0;
+  const previewHoldingCost = getHoldingCostMeta(previewDay?.scopes.all);
 
   return (
     <div className="sheet" aria-hidden="false">
@@ -936,12 +1006,13 @@ function ManualDaySheet({
                 ? `该日期已有 ${existingSameDate.trades.length} 笔记录；保存时会把新手动交易合并进去。`
                 : '保存后会作为新的交易日写入。'}
           </p>
+          <p className="inline-help">同一交易日会按列表顺序计算；可以用卡片右侧的上下箭头调整先后。</p>
         </div>
 
         <div className={`day-sheet-summary ${previewProfit > 0 ? 'positive' : previewProfit < 0 ? 'negative' : 'neutral'}`}>
-          {previewFinancing > 0
-            ? `当日已实现损益：${formatMoney(previewProfit)}（已扣融资成本 ${formatMoney(previewFinancing, { signed: false })}）`
-            : `当日已实现损益：${formatMoney(previewProfit)}`}
+          {previewHoldingCost.value > 0
+            ? `当日已实现净损益：${formatMoney(previewProfit)}（${previewHoldingCost.label} ${formatMoney(previewHoldingCost.value, { signed: false })}）`
+            : `当日已实现净损益：${formatMoney(previewProfit)}`}
         </div>
 
         <div className="trade-editor-list">
@@ -949,6 +1020,7 @@ function ManualDaySheet({
             const displayName = getStockDisplayName(trade.symbol, trade.name);
             const gross = (Number(trade.quantity) || 0) * (Number(trade.price) || 0);
             const ratio = trade.ratioSnapshot || snapshot.settings.dividendRules[trade.assetType === 'margin' ? 'margin' : 'cash'];
+            const settlementField = getManualSettlementFieldConfig(trade);
 
             if (trade.fingerprint) {
               return (
@@ -963,6 +1035,11 @@ function ManualDaySheet({
                         {trade.assetType === 'margin' ? '信用' : '现物'}
                       </span>
                       <span className="badge badge-imported">CSV</span>
+                      {getTradeProfitSourceLabel(trade) ? (
+                        <StatusBadge tone={getTradeProfitSourceTone(trade)}>{getTradeProfitSourceLabel(trade)}</StatusBadge>
+                      ) : null}
+                      <button type="button" className="icon-btn small" onClick={() => onMoveTrade(index, -1)} aria-label="上移" disabled={index === 0}>↑</button>
+                      <button type="button" className="icon-btn small" onClick={() => onMoveTrade(index, 1)} aria-label="下移" disabled={index === state.trades.length - 1}>↓</button>
                     </div>
                   </div>
                   <div className="trade-meta">
@@ -977,6 +1054,9 @@ function ManualDaySheet({
                     <span className="trade-subline">
                       数量 {Number(trade.quantity) || 0} 股 · 单价 {formatMoney(trade.price, { signed: false })} · 快照比例 {ratio?.numerator || 1} / {ratio?.denominator || 3}
                     </span>
+                    {trade.reportedClosePnl != null ? (
+                      <span className="trade-subline">券商净值 {formatMoney(trade.reportedClosePnl)}</span>
+                    ) : null}
                   </div>
                 </article>
               );
@@ -991,7 +1071,11 @@ function ManualDaySheet({
                     <h3 className="trade-title">{displayName || '新交易'}</h3>
                     <p className="trade-subtitle">{trade.symbol || '输入代码后会自动匹配日股名称'}</p>
                   </div>
-                  <button type="button" className="remove-trade-btn" onClick={() => onRemoveTrade(index)}>×</button>
+                  <div className="badge-row">
+                    <button type="button" className="icon-btn small" onClick={() => onMoveTrade(index, -1)} aria-label="上移" disabled={index === 0}>↑</button>
+                    <button type="button" className="icon-btn small" onClick={() => onMoveTrade(index, 1)} aria-label="下移" disabled={index === state.trades.length - 1}>↓</button>
+                    <button type="button" className="remove-trade-btn" onClick={() => onRemoveTrade(index)}>×</button>
+                  </div>
                 </div>
 
                 <div className="editor-row two">
@@ -1171,15 +1255,32 @@ function ManualDaySheet({
                       </label>
                     </div>
                     <label className="field-group">
-                      <span className="form-label">受渡金额 / 决済损益</span>
+                      <span className="form-label">持有成本</span>
+                      <input
+                        type="text"
+                        className="form-input"
+                        inputMode="decimal"
+                        value={trade.holdingCost ?? ''}
+                        placeholder={trade.assetType === 'margin' && trade.positionEffect === 'close' ? '可填券商实际金利/贷株等持有成本' : '非必填'}
+                        onChange={(event) => onUpdateTrade(index, 'holdingCost', event.target.value)}
+                      />
+                      <span className="inline-help">
+                        {trade.assetType === 'margin' && trade.positionEffect === 'close'
+                          ? '填写后，这笔信用平仓会优先用你输入的持有成本，而不是系统估算。'
+                          : '只在需要手工修正持有成本时填写。'}
+                      </span>
+                    </label>
+                    <label className="field-group">
+                      <span className="form-label">{settlementField.label}</span>
                       <input
                         type="text"
                         className="form-input"
                         inputMode="decimal"
                         value={trade.settlementAmount ?? ''}
-                        placeholder="可留空让系统按数量×单价估算"
+                        placeholder={settlementField.placeholder}
                         onChange={(event) => onUpdateTrade(index, 'settlementAmount', event.target.value)}
                       />
+                      <span className="inline-help">{settlementField.help}</span>
                     </label>
                     <label className="field-group">
                       <span className="form-label">备注</span>
@@ -1377,6 +1478,25 @@ export function App() {
     });
   }
 
+  function handleManualMove(index, offset) {
+    setManualSheet((current) => {
+      const targetIndex = index + offset;
+      if (targetIndex < 0 || targetIndex >= current.trades.length) return current;
+
+      const nextTrades = [...current.trades];
+      const [movedTrade] = nextTrades.splice(index, 1);
+      nextTrades.splice(targetIndex, 0, movedTrade);
+
+      return {
+        ...current,
+        trades: nextTrades.map((trade, tradeIndex) => normalizeTrade({
+          ...trade,
+          order: tradeIndex
+        }, current.date || todayStr(), tradeIndex))
+      };
+    });
+  }
+
   function handleManualAdd() {
     setManualSheet((current) => ({
       ...current,
@@ -1421,6 +1541,12 @@ export function App() {
     applySnapshot(next);
     setRatioSheet(createRatioState());
     setToast({ tone: 'success', text: '新的分红比例已保存，只会影响后续新增交易。' });
+  }
+
+  async function handleAccountingSettingChange(field, value) {
+    const next = updateAccountingSettings({ [field]: value });
+    applySnapshot(next);
+    setToast({ tone: 'success', text: '新的计算口径已保存。' });
   }
 
   async function handleCsvImport(event) {
@@ -1554,6 +1680,7 @@ export function App() {
 
   const filteredRecordSummary = summarizeRecordDays(filteredRecordDays, dashboardScope);
   const hasActiveRecordFilters = Boolean(recordFilterBadges.length);
+  const analysisHoldingCostMeta = getHoldingCostMeta(analysisSummary);
 
   const recordPageSize = recordFilters.compact ? 10 : RECORDS_PAGE_SIZE;
   const totalRecordPages = filteredRecordDays.length ? Math.ceil(filteredRecordDays.length / recordPageSize) : 0;
@@ -2106,8 +2233,8 @@ export function App() {
                         </strong>
                       </div>
                       <div className="stats-row">
-                        <span>融资成本</span>
-                        <strong className="negative">{formatMoney(analysisSummary.financingCost, { signed: false })}</strong>
+                        <span>{analysisHoldingCostMeta.label}</span>
+                        <strong className="negative">{formatMoney(analysisHoldingCostMeta.value, { signed: false })}</strong>
                       </div>
                     </div>
                   </section>
@@ -2479,6 +2606,63 @@ export function App() {
                   <button type="button" className="primary-btn wide-btn" onClick={openAddSheet}>手动录入</button>
                   <button type="button" className="secondary-btn wide-btn" onClick={() => csvInputRef.current?.click()}>上传 CSV</button>
                 </div>
+                <div className="card-header">
+                  <div>
+                    <div className="section-kicker">计算口径</div>
+                    <h2>精度设置</h2>
+                  </div>
+                </div>
+                <div className="settings-overview-grid">
+                  <article className="status-card">
+                    <span className="status-card-label">成本口径</span>
+                    <strong className="status-card-value">{getCostBasisMethodLabel(snapshot.settings.accounting.costBasisMethod)}</strong>
+                    <p className="settings-note">默认推荐移动均价；想按 lot 复盘可以切到 FIFO。</p>
+                  </article>
+                  <article className="status-card">
+                    <span className="status-card-label">平仓净值</span>
+                    <strong className="status-card-value">{getCloseValueModeLabel(snapshot.settings.accounting.closeValueMode)}</strong>
+                    <p className="settings-note">优先券商会先用信用平仓里的券商决済损益。</p>
+                  </article>
+                </div>
+                <div className="editor-row">
+                  <span className="form-label">成本算法</span>
+                  <div className="editor-segment">
+                    <button
+                      type="button"
+                      className={`editor-chip ${snapshot.settings.accounting.costBasisMethod === COST_BASIS_METHODS.MOVING_AVERAGE ? 'active' : ''}`}
+                      onClick={() => handleAccountingSettingChange('costBasisMethod', COST_BASIS_METHODS.MOVING_AVERAGE)}
+                    >
+                      移动均价
+                    </button>
+                    <button
+                      type="button"
+                      className={`editor-chip ${snapshot.settings.accounting.costBasisMethod === COST_BASIS_METHODS.FIFO ? 'active' : ''}`}
+                      onClick={() => handleAccountingSettingChange('costBasisMethod', COST_BASIS_METHODS.FIFO)}
+                    >
+                      FIFO
+                    </button>
+                  </div>
+                </div>
+                <div className="editor-row">
+                  <span className="form-label">信用平仓净值</span>
+                  <div className="editor-segment">
+                    <button
+                      type="button"
+                      className={`editor-chip ${snapshot.settings.accounting.closeValueMode === CLOSE_VALUE_MODES.PREFER_REPORTED ? 'active' : ''}`}
+                      onClick={() => handleAccountingSettingChange('closeValueMode', CLOSE_VALUE_MODES.PREFER_REPORTED)}
+                    >
+                      优先券商
+                    </button>
+                    <button
+                      type="button"
+                      className={`editor-chip ${snapshot.settings.accounting.closeValueMode === CLOSE_VALUE_MODES.MODEL_ONLY ? 'active' : ''}`}
+                      onClick={() => handleAccountingSettingChange('closeValueMode', CLOSE_VALUE_MODES.MODEL_ONLY)}
+                    >
+                      总是重算
+                    </button>
+                  </div>
+                </div>
+                <p className="settings-note">同一交易日会严格按列表顺序处理，不再默认把开仓排到平仓前面。</p>
               </section>
             ) : null}
 
@@ -2619,6 +2803,7 @@ export function App() {
         onChangeDate={(value) => setManualSheet((current) => ({ ...current, date: value }))}
         onUpdateTrade={handleManualTradeUpdate}
         onRemoveTrade={handleManualRemove}
+        onMoveTrade={handleManualMove}
         onAddTrade={handleManualAdd}
         onDeleteDay={handleDeleteDay}
         onSave={handleManualSave}

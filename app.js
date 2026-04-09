@@ -36,6 +36,14 @@ const SCOPES = ['all', 'cash', 'margin'];
 const MARGIN_INTEREST_RATE = 0.028;
 const DAYS_IN_YEAR = 365;
 const RECORDS_PAGE_SIZE = 6;
+const COST_BASIS_METHODS = {
+  MOVING_AVERAGE: 'moving_average',
+  FIFO: 'fifo'
+};
+const CLOSE_VALUE_MODES = {
+  PREFER_REPORTED: 'prefer_reported',
+  MODEL_ONLY: 'model_only'
+};
 
 const generateId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 const deepClone = (value) => {
@@ -128,6 +136,15 @@ function formatMoney(value, options = {}) {
   return `${amount < 0 ? '-' : ''}¥${abs}`;
 }
 
+function roundMoney(value) {
+  const amount = Number(value) || 0;
+  return Math.round((amount + Number.EPSILON) * 100) / 100;
+}
+
+function sumMoney(left, right) {
+  return roundMoney((Number(left) || 0) + (Number(right) || 0));
+}
+
 function formatPercent(value) {
   return `${Number(value || 0).toFixed(0)}%`;
 }
@@ -214,9 +231,6 @@ function compareTradeOrder(a, b) {
 }
 
 function compareTradeProcessingOrder(a, b) {
-  const effectWeight = (trade) => trade.positionEffect === 'open' ? 0 : 1;
-  const effectDelta = effectWeight(a) - effectWeight(b);
-  if (effectDelta !== 0) return effectDelta;
   return compareTradeOrder(a, b);
 }
 
@@ -272,7 +286,10 @@ function createScopeDayState() {
   return {
     grossProfit: 0,
     profit: 0,
+    holdingCost: 0,
+    estimatedHoldingCost: 0,
     financingCost: 0,
+    estimatedFinancingCost: 0,
     dividend: 0,
     tradeCount: 0,
     closeTradeCount: 0,
@@ -288,7 +305,10 @@ function createScopeSummary() {
   return {
     grossProfit: 0,
     totalProfit: 0,
+    holdingCost: 0,
+    estimatedHoldingCost: 0,
     financingCost: 0,
+    estimatedFinancingCost: 0,
     activeDays: 0,
     winDays: 0,
     lossDays: 0,
@@ -307,8 +327,8 @@ function createScopeSummary() {
     totalDividend: 0,
     totalLossShare: 0,
     netDividend: 0,
-    today: { profit: 0, dividend: 0, tradeCount: 0, financingCost: 0 },
-    week: { profit: 0, dividend: 0, tradeCount: 0, financingCost: 0 }
+    today: { profit: 0, dividend: 0, tradeCount: 0, holdingCost: 0, estimatedHoldingCost: 0, financingCost: 0, estimatedFinancingCost: 0 },
+    week: { profit: 0, dividend: 0, tradeCount: 0, holdingCost: 0, estimatedHoldingCost: 0, financingCost: 0, estimatedFinancingCost: 0 }
   };
 }
 
@@ -624,6 +644,29 @@ function createDividendRule(assetType, numerator = 1, denominator = 3, updatedAt
   };
 }
 
+function createDefaultAccountingSettings() {
+  return {
+    costBasisMethod: COST_BASIS_METHODS.MOVING_AVERAGE,
+    closeValueMode: CLOSE_VALUE_MODES.PREFER_REPORTED
+  };
+}
+
+function normalizeAccountingSettings(raw) {
+  const defaults = createDefaultAccountingSettings();
+  const value = raw && typeof raw === 'object' ? raw : {};
+  const costBasisMethod = Object.values(COST_BASIS_METHODS).includes(value.costBasisMethod)
+    ? value.costBasisMethod
+    : defaults.costBasisMethod;
+  const closeValueMode = Object.values(CLOSE_VALUE_MODES).includes(value.closeValueMode)
+    ? value.closeValueMode
+    : defaults.closeValueMode;
+
+  return {
+    costBasisMethod,
+    closeValueMode
+  };
+}
+
 function createDefaultSettings() {
   const now = new Date().toISOString();
   return {
@@ -631,6 +674,7 @@ function createDefaultSettings() {
     updatedAt: now,
     lastCsvImportAt: '',
     lastCsvImportSummary: null,
+    accounting: createDefaultAccountingSettings(),
     dividendRules: {
       cash: createDividendRule('cash', 1, 3, now),
       margin: createDividendRule('margin', 1, 3, now)
@@ -658,6 +702,7 @@ function normalizeSettings(raw) {
     updatedAt: settings.updatedAt || defaults.updatedAt,
     lastCsvImportAt: settings.lastCsvImportAt || '',
     lastCsvImportSummary: settings.lastCsvImportSummary || null,
+    accounting: normalizeAccountingSettings(settings.accounting),
     dividendRules: {
       cash: (() => {
         const rule = settings.dividendRules?.cash;
@@ -696,6 +741,23 @@ function cloneActiveRuleSnapshot(assetType) {
     denominator: rule.denominator,
     updatedAt: rule.updatedAt
   };
+}
+
+function isClosingTrade(trade) {
+  return trade.positionEffect === 'close' || (trade.assetType === 'cash' && trade.action === 'sell');
+}
+
+function isMarginCloseTrade(trade) {
+  return trade.assetType === 'margin' && trade.positionEffect === 'close';
+}
+
+function getTradeReportedClosePnl(trade) {
+  if (!isMarginCloseTrade(trade)) return null;
+  return trade.settlementAmount === '' ? null : safeNumber(trade.settlementAmount);
+}
+
+function getTradeHoldingCostOverride(trade) {
+  return trade.holdingCost === '' ? null : safeNumber(trade.holdingCost);
 }
 
 // ===== Trade Model =====
@@ -810,6 +872,7 @@ function createManualTrade(preset = {}) {
     price: preset.price ?? '',
     fee: preset.fee ?? '',
     taxAmount: preset.taxAmount ?? '',
+    holdingCost: preset.holdingCost ?? '',
     settlementDate: preset.settlementDate || '',
     settlementAmount: preset.settlementAmount ?? '',
     notes: preset.notes || '',
@@ -860,6 +923,7 @@ function normalizeTrade(trade, dayDate, index = 0) {
     price: raw.price === '' ? '' : (safeNumber(raw.price) ?? ''),
     fee: raw.fee === '' ? '' : (safeNumber(raw.fee) ?? ''),
     taxAmount: raw.taxAmount === '' ? '' : (safeNumber(raw.taxAmount) ?? ''),
+    holdingCost: raw.holdingCost === '' ? '' : (safeNumber(raw.holdingCost) ?? ''),
     settlementDate: normalizeAnyDate(raw.settlementDate) || '',
     settlementAmount: raw.settlementAmount === '' ? '' : (safeNumber(raw.settlementAmount) ?? ''),
     notes: trimText(raw.notes || ''),
@@ -1256,18 +1320,29 @@ function addLongPosition(map, trade, quantity, totalCost, openedDate = '') {
   }
 }
 
-function reduceLongLots(position, closeQty, closeDate, applyFinancing = false) {
+function finalizeLongPosition(position) {
+  if (!position) return;
+  position.lots = Array.isArray(position.lots)
+    ? position.lots.filter((lot) => (Number(lot.quantity) || 0) > 1e-8 && (Number(lot.totalCost) || 0) > 1e-8)
+    : [];
+  position.quantity = position.lots.reduce((acc, lot) => acc + (Number(lot.quantity) || 0), 0);
+  position.totalCost = roundMoney(position.lots.reduce((acc, lot) => acc + (Number(lot.totalCost) || 0), 0));
+}
+
+function reduceLotsProportionally(position, closeQty, closeDate, options = {}) {
+  const { applyHoldingCost = false } = options;
   if (!Array.isArray(position?.lots) || !position.lots.length) {
-    return { financingCost: 0, weightedHoldingDays: 0 };
+    return { costBasis: 0, estimatedHoldingCost: 0, weightedHoldingDays: 0 };
   }
 
   const totalQuantity = Number(position.quantity) || 0;
   if (totalQuantity <= 0 || closeQty <= 0) {
-    return { financingCost: 0, weightedHoldingDays: 0 };
+    return { costBasis: 0, estimatedHoldingCost: 0, weightedHoldingDays: 0 };
   }
 
   const closeRatio = Math.min(1, closeQty / totalQuantity);
-  let financingCost = 0;
+  let costBasis = 0;
+  let estimatedHoldingCost = 0;
   let weightedHoldingDays = 0;
 
   position.lots = position.lots
@@ -1278,40 +1353,104 @@ function reduceLongLots(position, closeQty, closeDate, applyFinancing = false) {
 
       const closedQuantity = lotQuantity * closeRatio;
       const closedCost = lotTotalCost * closeRatio;
+      costBasis += closedCost;
 
-      if (applyFinancing && closedCost > 0) {
+      if (applyHoldingCost && closedCost > 0) {
         const holdingDays = calculateInclusiveHoldingDays(lot.openDate, closeDate);
-        financingCost += (closedCost * MARGIN_INTEREST_RATE * holdingDays) / DAYS_IN_YEAR;
+        estimatedHoldingCost += (closedCost * MARGIN_INTEREST_RATE * holdingDays) / DAYS_IN_YEAR;
         weightedHoldingDays += closedQuantity * holdingDays;
       }
 
       const nextQuantity = lotQuantity - closedQuantity;
       const nextTotalCost = lotTotalCost - closedCost;
-
       if (nextQuantity <= 1e-8 || nextTotalCost <= 1e-8) return null;
+
       return {
         ...lot,
         quantity: nextQuantity,
-        totalCost: nextTotalCost
+        totalCost: roundMoney(nextTotalCost)
       };
     })
     .filter(Boolean);
 
+  finalizeLongPosition(position);
   return {
-    financingCost,
+    costBasis: roundMoney(costBasis),
+    estimatedHoldingCost: roundMoney(estimatedHoldingCost),
+    weightedHoldingDays
+  };
+}
+
+function reduceLotsByFifo(position, closeQty, closeDate, options = {}) {
+  const { applyHoldingCost = false } = options;
+  if (!Array.isArray(position?.lots) || !position.lots.length) {
+    return { costBasis: 0, estimatedHoldingCost: 0, weightedHoldingDays: 0 };
+  }
+
+  let remainingQuantity = closeQty;
+  let costBasis = 0;
+  let estimatedHoldingCost = 0;
+  let weightedHoldingDays = 0;
+  const nextLots = [];
+
+  position.lots.forEach((lot) => {
+    const lotQuantity = Number(lot.quantity) || 0;
+    const lotTotalCost = Number(lot.totalCost) || 0;
+    if (lotQuantity <= 0 || lotTotalCost <= 0) return;
+
+    if (remainingQuantity <= 1e-8) {
+      nextLots.push(lot);
+      return;
+    }
+
+    const closedQuantity = Math.min(remainingQuantity, lotQuantity);
+    const lotUnitCost = lotTotalCost / lotQuantity;
+    const closedCost = lotUnitCost * closedQuantity;
+    costBasis += closedCost;
+
+    if (applyHoldingCost && closedCost > 0) {
+      const holdingDays = calculateInclusiveHoldingDays(lot.openDate, closeDate);
+      estimatedHoldingCost += (closedCost * MARGIN_INTEREST_RATE * holdingDays) / DAYS_IN_YEAR;
+      weightedHoldingDays += closedQuantity * holdingDays;
+    }
+
+    const nextQuantity = lotQuantity - closedQuantity;
+    if (nextQuantity > 1e-8) {
+      nextLots.push({
+        ...lot,
+        quantity: nextQuantity,
+        totalCost: roundMoney(lotUnitCost * nextQuantity)
+      });
+    }
+
+    remainingQuantity -= closedQuantity;
+  });
+
+  position.lots = nextLots;
+  finalizeLongPosition(position);
+  return {
+    costBasis: roundMoney(costBasis),
+    estimatedHoldingCost: roundMoney(estimatedHoldingCost),
     weightedHoldingDays
   };
 }
 
 function closeLongPosition(map, symbol, quantity, revenue, closeDate, options = {}) {
-  const { applyFinancing = false } = options;
+  const {
+    applyHoldingCost = false,
+    holdingCostOverride = null,
+    costBasisMethod = COST_BASIS_METHODS.MOVING_AVERAGE
+  } = options;
   const position = map.get(symbol);
   if (!position || position.quantity <= 0) {
     return {
       closeQty: 0,
+      costBasis: 0,
       grossProfit: 0,
-      financingCost: 0,
-      netProfit: 0,
+      holdingCost: 0,
+      estimatedHoldingCost: 0,
+      holdingCostSource: 'none',
+      derivedNetProfit: 0,
       averageHoldingDays: 0
     };
   }
@@ -1320,36 +1459,44 @@ function closeLongPosition(map, symbol, quantity, revenue, closeDate, options = 
   if (closeQty <= 0) {
     return {
       closeQty: 0,
+      costBasis: 0,
       grossProfit: 0,
-      financingCost: 0,
-      netProfit: 0,
+      holdingCost: 0,
+      estimatedHoldingCost: 0,
+      holdingCostSource: 'none',
+      derivedNetProfit: 0,
       averageHoldingDays: 0
     };
   }
 
-  const avgCost = position.totalCost / position.quantity;
-  const costBasis = avgCost * closeQty;
-  const grossProfit = revenue - costBasis;
-  const lotResult = reduceLongLots(position, closeQty, closeDate, applyFinancing);
-  const financingCost = applyFinancing ? lotResult.financingCost : 0;
+  const lotReducer = costBasisMethod === COST_BASIS_METHODS.FIFO
+    ? reduceLotsByFifo
+    : reduceLotsProportionally;
+  const lotResult = lotReducer(position, closeQty, closeDate, { applyHoldingCost });
+  const costBasis = lotResult.costBasis;
+  const grossProfit = roundMoney(revenue - costBasis);
+  const estimatedHoldingCost = applyHoldingCost ? lotResult.estimatedHoldingCost : 0;
+  const holdingCost = holdingCostOverride != null
+    ? roundMoney(holdingCostOverride)
+    : estimatedHoldingCost;
 
-  position.quantity -= closeQty;
-  position.totalCost -= costBasis;
-
-  if (position.quantity <= 0) {
+  if (position.quantity <= 1e-8) {
     map.delete(symbol);
   }
 
   return {
     closeQty,
+    costBasis,
     grossProfit,
-    financingCost,
-    netProfit: grossProfit - financingCost,
+    holdingCost,
+    estimatedHoldingCost,
+    holdingCostSource: holdingCostOverride != null ? 'manual' : applyHoldingCost ? 'estimated' : 'none',
+    derivedNetProfit: roundMoney(grossProfit - holdingCost),
     averageHoldingDays: closeQty > 0 ? lotResult.weightedHoldingDays / closeQty : 0
   };
 }
 
-function addShortPosition(map, trade, quantity, totalEntry) {
+function addShortPosition(map, trade, quantity, totalEntry, openedDate = '') {
   const symbol = trade.symbol;
   if (!map.has(symbol)) {
     map.set(symbol, {
@@ -1357,7 +1504,8 @@ function addShortPosition(map, trade, quantity, totalEntry) {
       name: getStockDisplayName(symbol, trade.name),
       quantity: 0,
       totalEntry: 0,
-      market: trade.market
+      market: trade.market,
+      lots: []
     });
   }
 
@@ -1365,28 +1513,151 @@ function addShortPosition(map, trade, quantity, totalEntry) {
   position.name = trade.name || position.name || getStockDisplayName(symbol);
   position.market = trade.market || position.market || 'tse';
   position.quantity += quantity;
-  position.totalEntry += totalEntry;
+  position.totalEntry = roundMoney(position.totalEntry + totalEntry);
+
+  if (quantity > 0 && totalEntry > 0) {
+    position.lots.push({
+      openDate: normalizeAnyDate(openedDate) || '',
+      quantity,
+      totalEntry
+    });
+  }
 }
 
-function closeShortPosition(map, symbol, quantity, costToClose) {
+function finalizeShortPosition(position) {
+  if (!position) return;
+  position.lots = Array.isArray(position.lots)
+    ? position.lots.filter((lot) => (Number(lot.quantity) || 0) > 1e-8 && (Number(lot.totalEntry) || 0) > 1e-8)
+    : [];
+  position.quantity = position.lots.reduce((acc, lot) => acc + (Number(lot.quantity) || 0), 0);
+  position.totalEntry = roundMoney(position.lots.reduce((acc, lot) => acc + (Number(lot.totalEntry) || 0), 0));
+}
+
+function reduceShortLotsProportionally(position, closeQty) {
+  if (!Array.isArray(position?.lots) || !position.lots.length) {
+    return { entryValue: 0 };
+  }
+
+  const totalQuantity = Number(position.quantity) || 0;
+  if (totalQuantity <= 0 || closeQty <= 0) return { entryValue: 0 };
+
+  const closeRatio = Math.min(1, closeQty / totalQuantity);
+  let entryValue = 0;
+
+  position.lots = position.lots
+    .map((lot) => {
+      const lotQuantity = Number(lot.quantity) || 0;
+      const lotTotalEntry = Number(lot.totalEntry) || 0;
+      if (lotQuantity <= 0 || lotTotalEntry <= 0) return null;
+
+      const closedQuantity = lotQuantity * closeRatio;
+      const closedEntry = lotTotalEntry * closeRatio;
+      entryValue += closedEntry;
+
+      const nextQuantity = lotQuantity - closedQuantity;
+      const nextTotalEntry = lotTotalEntry - closedEntry;
+      if (nextQuantity <= 1e-8 || nextTotalEntry <= 1e-8) return null;
+
+      return {
+        ...lot,
+        quantity: nextQuantity,
+        totalEntry: roundMoney(nextTotalEntry)
+      };
+    })
+    .filter(Boolean);
+
+  finalizeShortPosition(position);
+  return { entryValue: roundMoney(entryValue) };
+}
+
+function reduceShortLotsByFifo(position, closeQty) {
+  if (!Array.isArray(position?.lots) || !position.lots.length) {
+    return { entryValue: 0 };
+  }
+
+  let remainingQuantity = closeQty;
+  let entryValue = 0;
+  const nextLots = [];
+
+  position.lots.forEach((lot) => {
+    const lotQuantity = Number(lot.quantity) || 0;
+    const lotTotalEntry = Number(lot.totalEntry) || 0;
+    if (lotQuantity <= 0 || lotTotalEntry <= 0) return;
+
+    if (remainingQuantity <= 1e-8) {
+      nextLots.push(lot);
+      return;
+    }
+
+    const closedQuantity = Math.min(remainingQuantity, lotQuantity);
+    const lotUnitEntry = lotTotalEntry / lotQuantity;
+    const closedEntry = lotUnitEntry * closedQuantity;
+    entryValue += closedEntry;
+
+    const nextQuantity = lotQuantity - closedQuantity;
+    if (nextQuantity > 1e-8) {
+      nextLots.push({
+        ...lot,
+        quantity: nextQuantity,
+        totalEntry: roundMoney(lotUnitEntry * nextQuantity)
+      });
+    }
+
+    remainingQuantity -= closedQuantity;
+  });
+
+  position.lots = nextLots;
+  finalizeShortPosition(position);
+  return { entryValue: roundMoney(entryValue) };
+}
+
+function closeShortPosition(map, symbol, quantity, costToClose, options = {}) {
+  const {
+    holdingCostOverride = null,
+    costBasisMethod = COST_BASIS_METHODS.MOVING_AVERAGE
+  } = options;
   const position = map.get(symbol);
-  if (!position || position.quantity <= 0) return 0;
+  if (!position || position.quantity <= 0) {
+    return {
+      closeQty: 0,
+      entryValue: 0,
+      grossProfit: 0,
+      holdingCost: 0,
+      estimatedHoldingCost: 0,
+      holdingCostSource: 'none',
+      derivedNetProfit: 0
+    };
+  }
 
   const closeQty = Math.min(quantity, position.quantity);
-  const avgEntry = position.totalEntry / position.quantity;
-  const entryValue = avgEntry * closeQty;
-  position.quantity -= closeQty;
-  position.totalEntry -= entryValue;
+  const lotReducer = costBasisMethod === COST_BASIS_METHODS.FIFO
+    ? reduceShortLotsByFifo
+    : reduceShortLotsProportionally;
+  const lotResult = lotReducer(position, closeQty);
+  const entryValue = lotResult.entryValue;
+  const grossProfit = roundMoney(entryValue - costToClose);
+  const holdingCost = holdingCostOverride != null ? roundMoney(holdingCostOverride) : 0;
 
-  if (position.quantity <= 0) {
+  if (position.quantity <= 1e-8) {
     map.delete(symbol);
   }
 
-  return entryValue - costToClose;
+  return {
+    closeQty,
+    entryValue,
+    grossProfit,
+    holdingCost,
+    estimatedHoldingCost: 0,
+    holdingCostSource: holdingCostOverride != null ? 'manual' : 'none',
+    derivedNetProfit: roundMoney(grossProfit - holdingCost)
+  };
 }
 
 function buildAnalytics(days) {
   const normalizedDays = days.map(normalizeDay).sort(compareByDateAsc);
+  const accountingSettings = normalizeAccountingSettings(SETTINGS.accounting);
+  const costBasisMethod = accountingSettings.costBasisMethod;
+  const closeValueMode = accountingSettings.closeValueMode;
   const dayViews = normalizedDays.map((day) => ({
     id: day.id,
     date: day.date,
@@ -1411,7 +1682,7 @@ function buildAnalytics(days) {
     const dayView = dayMap.get(day.date);
     const processingTrades = day.trades
       .map((trade, index) => normalizeTrade(trade, day.date, index))
-      .sort(compareTradeProcessingOrder);
+      .sort(compareTradeOrder);
 
     processingTrades.forEach((normalizedTrade) => {
       const quantity = Number(normalizedTrade.quantity) || 0;
@@ -1419,52 +1690,118 @@ function buildAnalytics(days) {
       const fee = Number(normalizedTrade.fee) || 0;
       const taxAmount = Number(normalizedTrade.taxAmount) || 0;
       const settlementAmount = safeNumber(normalizedTrade.settlementAmount);
-      const grossAmount = quantity * price;
+      const holdingCostOverride = getTradeHoldingCostOverride(normalizedTrade);
+      const reportedClosePnl = getTradeReportedClosePnl(normalizedTrade);
+      const grossAmount = roundMoney(quantity * price);
       const buyCost = normalizedTrade.assetType === 'cash' && settlementAmount != null && normalizedTrade.action === 'buy'
         ? settlementAmount
-        : grossAmount + fee + taxAmount;
+        : roundMoney(grossAmount + fee + taxAmount);
       const sellRevenue = normalizedTrade.assetType === 'cash' && settlementAmount != null && normalizedTrade.action === 'sell'
         ? settlementAmount
-        : grossAmount - fee - taxAmount;
+        : roundMoney(grossAmount - fee - taxAmount);
 
       let realizedProfit = 0;
+      let derivedNetProfit = 0;
       let grossRealizedProfit = 0;
-      let financingCost = 0;
+      let holdingCost = 0;
+      let estimatedHoldingCost = 0;
+      let holdingCostSource = 'none';
+      let profitSource = 'open';
       let averageHoldingDays = 0;
+      let costBasisAmount = 0;
+      let closeValueAmount = 0;
 
       if (normalizedTrade.assetType === 'cash') {
         if (normalizedTrade.action === 'buy') {
           addLongPosition(cashPositions, normalizedTrade, quantity, buyCost, day.date);
+          closeValueAmount = buyCost;
         } else {
-          const closeResult = closeLongPosition(cashPositions, normalizedTrade.symbol, quantity, sellRevenue, day.date);
-          realizedProfit = closeResult.netProfit;
+          const closeResult = closeLongPosition(cashPositions, normalizedTrade.symbol, quantity, sellRevenue, day.date, {
+            costBasisMethod
+          });
+          derivedNetProfit = closeResult.derivedNetProfit;
+          realizedProfit = derivedNetProfit;
           grossRealizedProfit = closeResult.grossProfit;
+          holdingCost = closeResult.holdingCost;
+          estimatedHoldingCost = closeResult.estimatedHoldingCost;
+          holdingCostSource = closeResult.holdingCostSource;
+          costBasisAmount = closeResult.costBasis;
+          closeValueAmount = sellRevenue;
+          profitSource = 'model';
         }
       } else if (normalizedTrade.positionSide === 'short') {
         if (normalizedTrade.positionEffect === 'open') {
-          addShortPosition(marginShortPositions, normalizedTrade, quantity, grossAmount - fee - taxAmount);
+          addShortPosition(marginShortPositions, normalizedTrade, quantity, roundMoney(grossAmount - fee - taxAmount), day.date);
+          closeValueAmount = roundMoney(grossAmount - fee - taxAmount);
         } else {
-          realizedProfit = closeShortPosition(marginShortPositions, normalizedTrade.symbol, quantity, grossAmount + fee + taxAmount);
-          grossRealizedProfit = realizedProfit;
+          const closeResult = closeShortPosition(
+            marginShortPositions,
+            normalizedTrade.symbol,
+            quantity,
+            roundMoney(grossAmount + fee + taxAmount),
+            { holdingCostOverride, costBasisMethod }
+          );
+          derivedNetProfit = closeResult.derivedNetProfit;
+          realizedProfit = reportedClosePnl != null && closeValueMode === CLOSE_VALUE_MODES.PREFER_REPORTED
+            ? reportedClosePnl
+            : derivedNetProfit;
+          grossRealizedProfit = closeResult.grossProfit;
+          holdingCost = closeResult.holdingCost;
+          estimatedHoldingCost = closeResult.estimatedHoldingCost;
+          holdingCostSource = closeResult.holdingCostSource;
+          costBasisAmount = closeResult.entryValue;
+          closeValueAmount = roundMoney(grossAmount + fee + taxAmount);
+          profitSource = reportedClosePnl != null && closeValueMode === CLOSE_VALUE_MODES.PREFER_REPORTED
+            ? 'reported'
+            : holdingCostSource === 'manual'
+              ? 'manual'
+              : 'model';
         }
       } else {
         if (normalizedTrade.positionEffect === 'open') {
-          addLongPosition(marginLongPositions, normalizedTrade, quantity, grossAmount + fee + taxAmount, day.date);
+          addLongPosition(marginLongPositions, normalizedTrade, quantity, roundMoney(grossAmount + fee + taxAmount), day.date);
+          closeValueAmount = roundMoney(grossAmount + fee + taxAmount);
         } else {
           const closeResult = closeLongPosition(
             marginLongPositions,
             normalizedTrade.symbol,
             quantity,
-            grossAmount - fee - taxAmount,
+            roundMoney(grossAmount - fee - taxAmount),
             day.date,
-            { applyFinancing: true }
+            {
+              applyHoldingCost: true,
+              holdingCostOverride,
+              costBasisMethod
+            }
           );
-          realizedProfit = closeResult.netProfit;
+          derivedNetProfit = closeResult.derivedNetProfit;
+          realizedProfit = reportedClosePnl != null && closeValueMode === CLOSE_VALUE_MODES.PREFER_REPORTED
+            ? reportedClosePnl
+            : derivedNetProfit;
           grossRealizedProfit = closeResult.grossProfit;
-          financingCost = closeResult.financingCost;
+          holdingCost = closeResult.holdingCost;
+          estimatedHoldingCost = closeResult.estimatedHoldingCost;
+          holdingCostSource = closeResult.holdingCostSource;
           averageHoldingDays = closeResult.averageHoldingDays;
+          costBasisAmount = closeResult.costBasis;
+          closeValueAmount = roundMoney(grossAmount - fee - taxAmount);
+          profitSource = reportedClosePnl != null && closeValueMode === CLOSE_VALUE_MODES.PREFER_REPORTED
+            ? 'reported'
+            : holdingCostSource === 'manual'
+              ? 'manual'
+              : 'model';
         }
       }
+
+      realizedProfit = roundMoney(realizedProfit);
+      derivedNetProfit = roundMoney(derivedNetProfit);
+      grossRealizedProfit = roundMoney(grossRealizedProfit);
+      holdingCost = roundMoney(holdingCost);
+      estimatedHoldingCost = roundMoney(estimatedHoldingCost);
+      const appliedHoldingCost = profitSource === 'reported' ? 0 : holdingCost;
+      const carryingCostEstimate = profitSource === 'reported'
+        ? estimatedHoldingCost
+        : estimatedHoldingCost;
 
       const dividendAmount = day.date >= DIVIDEND_START_DATE
         ? calculateDividendWithRule(realizedProfit, normalizedTrade.ratioSnapshot)
@@ -1473,8 +1810,18 @@ function buildAnalytics(days) {
       const enrichedTrade = {
         ...normalizedTrade,
         realizedProfit,
+        derivedNetProfit,
         grossRealizedProfit,
-        financingCost,
+        holdingCost: appliedHoldingCost,
+        estimatedHoldingCost: carryingCostEstimate,
+        financingCost: appliedHoldingCost,
+        estimatedFinancingCost: carryingCostEstimate,
+        holdingCostSource,
+        reportedClosePnl,
+        profitSource,
+        costBasisMethod,
+        costBasisAmount,
+        closeValueAmount,
         averageHoldingDays,
         dividendAmount,
         dayDate: day.date
@@ -1486,10 +1833,13 @@ function buildAnalytics(days) {
       const targets = [dayView.scopes.all, dayView.scopes[normalizedTrade.assetType]];
       targets.forEach((scopeState) => {
         scopeState.tradeCount += 1;
-        scopeState.grossProfit += grossRealizedProfit;
-        scopeState.profit += realizedProfit;
-        scopeState.financingCost += financingCost;
-        scopeState.dividend += dividendAmount;
+        scopeState.grossProfit = sumMoney(scopeState.grossProfit, grossRealizedProfit);
+        scopeState.profit = sumMoney(scopeState.profit, realizedProfit);
+        scopeState.holdingCost = sumMoney(scopeState.holdingCost, appliedHoldingCost);
+        scopeState.estimatedHoldingCost = sumMoney(scopeState.estimatedHoldingCost, carryingCostEstimate);
+        scopeState.financingCost = scopeState.holdingCost;
+        scopeState.estimatedFinancingCost = scopeState.estimatedHoldingCost;
+        scopeState.dividend = sumMoney(scopeState.dividend, dividendAmount);
         scopeState.symbols.add(normalizedTrade.symbol || normalizedTrade.name || '');
 
         if (normalizedTrade.action === 'buy') scopeState.buyCount += 1;
@@ -1556,9 +1906,12 @@ function buildAnalytics(days) {
       const scopeDay = day.scopes[scope];
       if (!scopeDay.tradeCount) return;
 
-      summary.totalProfit += scopeDay.profit;
-      summary.grossProfit += scopeDay.grossProfit;
-      summary.financingCost += scopeDay.financingCost;
+      summary.totalProfit = sumMoney(summary.totalProfit, scopeDay.profit);
+      summary.grossProfit = sumMoney(summary.grossProfit, scopeDay.grossProfit);
+      summary.holdingCost = sumMoney(summary.holdingCost, scopeDay.holdingCost);
+      summary.estimatedHoldingCost = sumMoney(summary.estimatedHoldingCost, scopeDay.estimatedHoldingCost);
+      summary.financingCost = summary.holdingCost;
+      summary.estimatedFinancingCost = summary.estimatedHoldingCost;
       summary.activeDays += 1;
       summary.tradeCount += scopeDay.tradeCount;
       summary.buyCount += scopeDay.buyCount;
@@ -1574,15 +1927,21 @@ function buildAnalytics(days) {
           profit: scopeDay.profit,
           dividend: scopeDay.dividend,
           tradeCount: scopeDay.tradeCount,
-          financingCost: scopeDay.financingCost
+          holdingCost: scopeDay.holdingCost,
+          estimatedHoldingCost: scopeDay.estimatedHoldingCost,
+          financingCost: scopeDay.holdingCost,
+          estimatedFinancingCost: scopeDay.estimatedHoldingCost
         };
       }
 
       if (day.date >= monday && day.date <= today) {
-        summary.week.profit += scopeDay.profit;
-        summary.week.dividend += scopeDay.dividend;
+        summary.week.profit = sumMoney(summary.week.profit, scopeDay.profit);
+        summary.week.dividend = sumMoney(summary.week.dividend, scopeDay.dividend);
         summary.week.tradeCount += scopeDay.tradeCount;
-        summary.week.financingCost += scopeDay.financingCost;
+        summary.week.holdingCost = sumMoney(summary.week.holdingCost, scopeDay.holdingCost);
+        summary.week.estimatedHoldingCost = sumMoney(summary.week.estimatedHoldingCost, scopeDay.estimatedHoldingCost);
+        summary.week.financingCost = summary.week.holdingCost;
+        summary.week.estimatedFinancingCost = summary.week.estimatedHoldingCost;
       }
 
       if (day.date >= DIVIDEND_START_DATE && scopeDay.dividend !== 0) {
@@ -1596,10 +1955,10 @@ function buildAnalytics(days) {
       }
 
       const monthKey = day.date.slice(0, 7);
-      monthlyMap.set(monthKey, (monthlyMap.get(monthKey) || 0) + scopeDay.profit);
+      monthlyMap.set(monthKey, sumMoney(monthlyMap.get(monthKey) || 0, scopeDay.profit));
       scopeDay.symbols.forEach((symbol) => symbol && symbolSet.add(symbol));
-      summary.totalDividend += scopeDay.positiveDividend;
-      summary.totalLossShare += scopeDay.lossShare;
+      summary.totalDividend = sumMoney(summary.totalDividend, scopeDay.positiveDividend);
+      summary.totalLossShare = sumMoney(summary.totalLossShare, scopeDay.lossShare);
     });
 
     enrichedTrades.forEach((trade) => {
@@ -1618,13 +1977,13 @@ function buildAnalytics(days) {
       }
 
       const target = rankingMap.get(trade.symbol);
-      target.profit += trade.realizedProfit;
+      target.profit = sumMoney(target.profit, trade.realizedProfit);
       target.tradeCount += 1;
       if (trade.action === 'buy') target.buyCount += 1;
       if (trade.action === 'sell') target.sellCount += 1;
     });
 
-    summary.netDividend = summary.totalDividend - summary.totalLossShare;
+    summary.netDividend = roundMoney(summary.totalDividend - summary.totalLossShare);
     summary.winRate = summary.activeDays ? Math.round((summary.winDays / summary.activeDays) * 100) : 0;
     summary.symbolCount = symbolSet.size;
     summary.positions = positions[scope];
@@ -3511,6 +3870,15 @@ async function removeDayById(dayId) {
   return getTradeAppSnapshot();
 }
 
+function updateAccountingSettings(partialSettings = {}) {
+  SETTINGS.accounting = normalizeAccountingSettings({
+    ...SETTINGS.accounting,
+    ...(partialSettings && typeof partialSettings === 'object' ? partialSettings : {})
+  });
+  persistSettings();
+  return getTradeAppSnapshot();
+}
+
 function updateDividendRule(assetType, numerator, denominator) {
   const target = assetType === 'margin' ? 'margin' : 'cash';
   SETTINGS.dividendRules[target] = createDividendRule(
@@ -3567,7 +3935,9 @@ if (hasLegacyUiRoot()) {
 
 export {
   APP_VERSION,
+  CLOSE_VALUE_MODES,
   CLOUD_SYNC_META_KEY,
+  COST_BASIS_METHODS,
   DIVIDEND_START_DATE,
   FIREBASE_CONFIG_KEY,
   MANUAL_TYPE_MAP,
@@ -3603,6 +3973,7 @@ export {
   signOutFromFirebase,
   todayStr,
   trimText,
+  updateAccountingSettings,
   updateDividendRule,
   upsertManualDay,
   getTradeAppSnapshot,
