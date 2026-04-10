@@ -1,12 +1,15 @@
 # freeWorkSpce
 
-交易账本现已迁到 `React + Vite`，并继续保持：
+一个面向手机网页的个人交易账本。
 
-- `IndexedDB` 本地存储
-- `Firebase Auth + Firestore` 云同步
-- CSV 导入与手动录入共用一套交易 schema
-- 现物 / 信用分开统计
-- 分红规则快照与 2026-04-01 起的分红口径
+现在的版本重点是：
+
+- 本地 `IndexedDB` 存储
+- `Firebase Auth + Firestore` 安全合并同步
+- CSV 导入与手动录入共用一套交易模型
+- 固定使用一套结算口径：
+  券商已提供信用平仓净损益时优先使用券商值，否则使用 FIFO lot 计算
+- 分红规则按交易快照保存，历史不回溯
 
 ## 本地开发
 
@@ -15,30 +18,16 @@ npm install
 npm run dev
 ```
 
-## 生产构建
+## 构建
 
 ```bash
 npm run build
 ```
 
-构建产物会输出到 `dist/`。
+## 目录
 
-## GitHub Pages
-
-项目已在 [vite.config.js](/Users/enkanoe/Documents/Personal/freeWorkSpce/vite.config.js) 里配置：
-
-- `base: '/freeWorkSpce/'`
-
-这适配当前的 GitHub Pages 地址：
-
-- `https://kanoes.github.io/freeWorkSpce/`
-
-如果以后仓库名变化，需要同步修改这个 `base`。
-
-## 主要目录
-
-- [src/App.jsx](/Users/enkanoe/Documents/Personal/freeWorkSpce/src/App.jsx)：React 主界面
-- [src/main.jsx](/Users/enkanoe/Documents/Personal/freeWorkSpce/src/main.jsx)：React 入口
-- [src/styles.css](/Users/enkanoe/Documents/Personal/freeWorkSpce/src/styles.css)：React 新增样式层
-- [app.js](/Users/enkanoe/Documents/Personal/freeWorkSpce/app.js)：保留下来的交易内核、IndexedDB、CSV、Firebase 逻辑
-- [styles.css](/Users/enkanoe/Documents/Personal/freeWorkSpce/styles.css)：原有视觉基础样式
+- `src/App.jsx`：React 容器层，只做状态编排
+- `src/components/`：页面组件、弹层、通用 UI
+- `src/lib/trade/`：交易模型、分析、存储、CSV、云同步
+- `companies_tse.json`：按需加载的股票名称数据
+- `.github/workflows/deploy.yml`：GitHub Pages 部署
