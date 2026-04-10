@@ -7,19 +7,6 @@ import {
   useState
 } from 'react';
 import {
-  ArcElement,
-  BarElement,
-  CategoryScale,
-  Chart as ChartJS,
-  Filler,
-  Legend,
-  LinearScale,
-  LineElement,
-  PointElement,
-  Tooltip
-} from 'chart.js';
-import { Bar, Line } from 'react-chartjs-2';
-import {
   APP_VERSION,
   CLOSE_VALUE_MODES,
   COST_BASIS_METHODS,
@@ -63,18 +50,6 @@ import {
   getTradeAppSnapshot
 } from '../app.js';
 
-ChartJS.register(
-  ArcElement,
-  BarElement,
-  CategoryScale,
-  Filler,
-  Legend,
-  LinearScale,
-  LineElement,
-  PointElement,
-  Tooltip
-);
-
 const TAB_ITEMS = [
   { id: 'home', label: '总览', icon: 'home' },
   { id: 'records', label: '记录', icon: 'list' },
@@ -82,6 +57,11 @@ const TAB_ITEMS = [
   { id: 'dividend', label: '分红', icon: 'gift' },
   { id: 'settings', label: '设置', icon: 'gear' }
 ];
+
+const MOBILE_BREAKPOINT = '(max-width: 640px)';
+const MOBILE_VISIBLE_LIMIT = 8;
+const MOBILE_RANKING_LIMIT = 10;
+let chartRuntimePromise = null;
 
 const DEFAULT_RECORD_FILTERS = {
   month: 'all',
@@ -121,6 +101,51 @@ const EMPTY_SNAPSHOT = {
 function cloneValue(value) {
   if (typeof structuredClone === 'function') return structuredClone(value);
   return JSON.parse(JSON.stringify(value));
+}
+
+function isCompactViewport() {
+  return typeof window !== 'undefined' && window.matchMedia(MOBILE_BREAKPOINT).matches;
+}
+
+async function loadChartRuntime() {
+  if (!chartRuntimePromise) {
+    chartRuntimePromise = Promise.all([
+      import('chart.js'),
+      import('react-chartjs-2')
+    ]).then(([chartJs, chartReact]) => {
+      const {
+        ArcElement,
+        BarElement,
+        CategoryScale,
+        Chart: ChartJS,
+        Filler,
+        Legend,
+        LinearScale,
+        LineElement,
+        PointElement,
+        Tooltip
+      } = chartJs;
+
+      ChartJS.register(
+        ArcElement,
+        BarElement,
+        CategoryScale,
+        Filler,
+        Legend,
+        LinearScale,
+        LineElement,
+        PointElement,
+        Tooltip
+      );
+
+      return {
+        Bar: chartReact.Bar,
+        Line: chartReact.Line
+      };
+    });
+  }
+
+  return chartRuntimePromise;
 }
 
 function isManualTradeComplete(trade) {
@@ -770,6 +795,64 @@ function StatusBadge({ tone, children }) {
   return <span className={`status-pill ${tone}`}>{children}</span>;
 }
 
+function DeferredChart({ kind, data, options, fallbackTitle = '图表加载中' }) {
+  const [runtime, setRuntime] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    loadChartRuntime()
+      .then((nextRuntime) => {
+        if (!active) return;
+        setRuntime(nextRuntime);
+      })
+      .catch(() => {
+        if (!active) return;
+        setRuntime({ failed: true });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (!runtime) {
+    return (
+      <div className="chart-loading-state">
+        <div className="empty-title">{fallbackTitle}</div>
+      </div>
+    );
+  }
+
+  if (runtime.failed) {
+    return (
+      <div className="chart-loading-state">
+        <div className="empty-title">图表暂时不可用</div>
+      </div>
+    );
+  }
+
+  const ChartComponent = kind === 'bar' ? runtime.Bar : runtime.Line;
+  return <ChartComponent data={data} options={options} />;
+}
+
+function CollapsibleSection({ title, kicker, meta = '', defaultOpen = true, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <section className={`card collapsible-section ${open ? 'open' : ''}`}>
+      <button type="button" className="collapsible-trigger" onClick={() => setOpen((current) => !current)} aria-expanded={open}>
+        <div>
+          {kicker ? <div className="section-kicker">{kicker}</div> : null}
+          <h2>{title}</h2>
+          {meta ? <p className="collapsible-meta">{meta}</p> : null}
+        </div>
+        <span className="collapsible-indicator">{open ? '收起' : '展开'}</span>
+      </button>
+      {open ? <div className="collapsible-body">{children}</div> : null}
+    </section>
+  );
+}
+
 function RecordDayCard({ day, scope, compact, onOpen }) {
   const scopeDay = day.scopes[scope];
   const symbols = Array.from(scopeDay.symbols || []).filter(Boolean).slice(0, compact ? 3 : 5);
@@ -1323,6 +1406,7 @@ export function App() {
   const [snapshot, setSnapshot] = useState(EMPTY_SNAPSHOT);
   const [ready, setReady] = useState(false);
   const [initialError, setInitialError] = useState('');
+  const [isCompactScreen, setIsCompactScreen] = useState(isCompactViewport);
   const [activeTab, setActiveTab] = useState('home');
   const [dashboardScope, setDashboardScope] = useState('all');
   const [analysisScope, setAnalysisScope] = useState('all');
@@ -1341,6 +1425,10 @@ export function App() {
   const [confirmState, setConfirmState] = useState({ open: false, mode: 'local' });
   const [firebaseDraft, setFirebaseDraft] = useState('');
   const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
+  const [showAllPositions, setShowAllPositions] = useState(false);
+  const [showAllRanking, setShowAllRanking] = useState(false);
+  const [showAllDividendHistory, setShowAllDividendHistory] = useState(false);
+  const [didAutoCompactRecords, setDidAutoCompactRecords] = useState(false);
   const [toast, setToast] = useState(null);
   const csvInputRef = useRef(null);
   const deferredSearch = useDeferredValue(recordFilters.search);
@@ -1378,8 +1466,29 @@ export function App() {
   }, [toast]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const media = window.matchMedia(MOBILE_BREAKPOINT);
+    const sync = () => setIsCompactScreen(media.matches);
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, []);
+
+  useEffect(() => {
+    if (!isCompactScreen || didAutoCompactRecords) return;
+    setRecordFilters((current) => (current.compact ? current : { ...current, compact: true }));
+    setDidAutoCompactRecords(true);
+  }, [didAutoCompactRecords, isCompactScreen]);
+
+  useEffect(() => {
     setRecordsPage(0);
   }, [dashboardScope, deferredSearch, recordFilters.month, recordFilters.source, recordFilters.outcome, recordFilters.sort, recordFilters.compact]);
+
+  useEffect(() => {
+    setShowAllPositions(false);
+    setShowAllRanking(false);
+    setShowAllDividendHistory(false);
+  }, [analysisPanel, dividendPanel, analysisScope, dividendScope, isCompactScreen]);
 
   async function syncSnapshot() {
     applySnapshot(getTradeAppSnapshot());
@@ -1681,6 +1790,16 @@ export function App() {
   const filteredRecordSummary = summarizeRecordDays(filteredRecordDays, dashboardScope);
   const hasActiveRecordFilters = Boolean(recordFilterBadges.length);
   const analysisHoldingCostMeta = getHoldingCostMeta(analysisSummary);
+  const sortedPositions = [...analysisSummary.positions].sort((a, b) => (b.quantity * b.avgPrice) - (a.quantity * a.avgPrice));
+  const visiblePositions = isCompactScreen && !showAllPositions
+    ? sortedPositions.slice(0, MOBILE_VISIBLE_LIMIT)
+    : sortedPositions;
+  const visibleRanking = isCompactScreen && !showAllRanking
+    ? analysisSummary.ranking.slice(0, MOBILE_RANKING_LIMIT)
+    : analysisSummary.ranking.slice(0, 20);
+  const visibleDividendHistory = isCompactScreen && !showAllDividendHistory
+    ? dividendSummary.dividendHistory.slice(0, MOBILE_VISIBLE_LIMIT)
+    : dividendSummary.dividendHistory;
 
   const recordPageSize = recordFilters.compact ? 10 : RECORDS_PAGE_SIZE;
   const totalRecordPages = filteredRecordDays.length ? Math.ceil(filteredRecordDays.length / recordPageSize) : 0;
@@ -1730,7 +1849,7 @@ export function App() {
         onChange={handleCsvImport}
       />
 
-      <div className="app-shell app-shell-react">
+      <div className={`app-shell app-shell-react ${isCompactScreen ? 'mobile-light' : ''}`}>
         {activeTab === 'home' ? (
           <div className="app-page tab-page">
             <AppTopBar
@@ -1759,9 +1878,9 @@ export function App() {
               />
             </AppTopBar>
 
-            {homePanel === 'overview' ? (
-              <div className="panel-stack">
-                <section className="card hero-overview-card">
+	            {homePanel === 'overview' ? (
+	              <div className="panel-stack">
+	                <section className="card hero-overview-card">
                   <div className="hero-overview-grid">
                     <div className="hero-overview-primary">
                       <span className="summary-label">累计已实现收益</span>
@@ -1805,35 +1924,40 @@ export function App() {
                       <span>回撤</span>
                       <strong className="negative">{formatMoney(dashboardDiagnostics.maxDrawdown, { signed: false })}</strong>
                     </article>
-                  </div>
-                </section>
+	                  </div>
+	                </section>
 
-                <section className="card compact-grid-card">
-                  <div className="results-hero-grid">
-                    <article className="overview-card compact">
-                      <span className="overview-label">最近交易日</span>
-                      <strong className="overview-value">{latestDay ? formatDateParts(latestDay.date).label : '--'}</strong>
-                      <span className="overview-meta">{latestDay ? formatMoney(latestDay.scopes[dashboardScope].profit) : '暂无'}</span>
-                    </article>
-                    <article className="overview-card compact">
-                      <span className="overview-label">最佳单日</span>
-                      <strong className="overview-value">{dashboardExtremes.best ? formatDateParts(dashboardExtremes.best.date).label : '--'}</strong>
-                      <span className="overview-meta">{dashboardExtremes.best ? formatMoney(dashboardExtremes.best.scopes[dashboardScope].profit) : '暂无'}</span>
-                    </article>
-                    <article className="overview-card compact">
-                      <span className="overview-label">交易天数</span>
-                      <strong className="overview-value">{dashboardSummary.activeDays}</strong>
-                      <span className="overview-meta">标的 {dashboardSummary.symbolCount}</span>
-                    </article>
-                    <article className="overview-card compact">
-                      <span className="overview-label">同步</span>
-                      <strong className="overview-value">{snapshot.firebase.isSignedIn ? '已连接' : '未连接'}</strong>
-                      <span className="overview-meta">{snapshot.firebase.syncStatusText}</span>
-                    </article>
-                  </div>
-                </section>
-              </div>
-            ) : null}
+	                <CollapsibleSection
+	                  title="更多概况"
+	                  kicker="二级信息"
+	                  meta="把不需要每次都看的摘要折叠起来，首页更轻一点。"
+	                  defaultOpen={!isCompactScreen}
+	                >
+	                  <div className="results-hero-grid">
+	                    <article className="overview-card compact">
+	                      <span className="overview-label">最近交易日</span>
+	                      <strong className="overview-value">{latestDay ? formatDateParts(latestDay.date).label : '--'}</strong>
+	                      <span className="overview-meta">{latestDay ? formatMoney(latestDay.scopes[dashboardScope].profit) : '暂无'}</span>
+	                    </article>
+	                    <article className="overview-card compact">
+	                      <span className="overview-label">最佳单日</span>
+	                      <strong className="overview-value">{dashboardExtremes.best ? formatDateParts(dashboardExtremes.best.date).label : '--'}</strong>
+	                      <span className="overview-meta">{dashboardExtremes.best ? formatMoney(dashboardExtremes.best.scopes[dashboardScope].profit) : '暂无'}</span>
+	                    </article>
+	                    <article className="overview-card compact">
+	                      <span className="overview-label">交易天数</span>
+	                      <strong className="overview-value">{dashboardSummary.activeDays}</strong>
+	                      <span className="overview-meta">标的 {dashboardSummary.symbolCount}</span>
+	                    </article>
+	                    <article className="overview-card compact">
+	                      <span className="overview-label">同步</span>
+	                      <strong className="overview-value">{snapshot.firebase.isSignedIn ? '已连接' : '未连接'}</strong>
+	                      <span className="overview-meta">{snapshot.firebase.syncStatusText}</span>
+	                    </article>
+	                  </div>
+	                </CollapsibleSection>
+	              </div>
+	            ) : null}
 
             {homePanel === 'trend' ? (
               <section className="card chart-stage-card">
@@ -1888,7 +2012,8 @@ export function App() {
                 </div>
                 <div className="chart-box">
                   {dashboardTimeline.length ? (
-                    <Line
+                    <DeferredChart
+                      kind="line"
                       data={chartData}
                       options={{
                         responsive: true,
@@ -1934,6 +2059,7 @@ export function App() {
                           }
                         }
                       }}
+                      fallbackTitle="正在载入趋势图"
                     />
                   ) : (
                     <div className="empty-state">
@@ -2149,9 +2275,9 @@ export function App() {
               />
             </AppTopBar>
 
-            {analysisPanel === 'metrics' ? (
-              <div className="panel-stack">
-                <section className="card analysis-hero-card">
+	            {analysisPanel === 'metrics' ? (
+	              <div className="panel-stack">
+	                <section className="card analysis-hero-card">
                   <div className="analysis-hero-grid">
                     <div className="analysis-hero-main">
                       <span className="summary-label">总收益</span>
@@ -2176,85 +2302,91 @@ export function App() {
                         <span>在仓</span>
                         <strong>{analysisSummary.positionsCount}</strong>
                       </article>
-                    </div>
-                  </div>
-                </section>
+	                    </div>
+	                  </div>
+	                </section>
 
-                <div className="panel-grid two">
-                  <section className="card diagnostics-card">
-                    <div className="section-kicker">行为</div>
-                    <h2>交易诊断</h2>
-                    <div className="stats-table">
-                      <div className="stats-row">
-                        <span>平均单笔</span>
-                        <strong>{formatMoney(analysisDiagnostics.avgPerClose)}</strong>
-                      </div>
-                      <div className="stats-row">
-                        <span>平均盈利</span>
-                        <strong className="positive">{formatMoney(analysisDiagnostics.avgWin)}</strong>
-                      </div>
-                      <div className="stats-row">
-                        <span>平均亏损</span>
-                        <strong className="negative">{formatMoney(analysisDiagnostics.avgLoss)}</strong>
-                      </div>
-                      <div className="stats-row">
-                        <span>盈亏比</span>
-                        <strong>{analysisDiagnostics.profitFactor ? analysisDiagnostics.profitFactor.toFixed(2) : '0.00'}</strong>
-                      </div>
-                      <div className="stats-row">
-                        <span>连胜 / 连亏</span>
-                        <strong>{analysisDiagnostics.maxWinStreak} / {analysisDiagnostics.maxLossStreak}</strong>
-                      </div>
-                    </div>
-                  </section>
+	                <CollapsibleSection
+	                  title="诊断详情"
+	                  kicker="次级指标"
+	                  meta="保留所有分析项，但默认把更深层的数据折起来，减少长滚动。"
+	                  defaultOpen={!isCompactScreen}
+	                >
+	                  <div className="panel-grid two">
+	                    <section className="card diagnostics-card nested-card">
+	                      <div className="section-kicker">行为</div>
+	                      <h2>交易诊断</h2>
+	                      <div className="stats-table">
+	                        <div className="stats-row">
+	                          <span>平均单笔</span>
+	                          <strong>{formatMoney(analysisDiagnostics.avgPerClose)}</strong>
+	                        </div>
+	                        <div className="stats-row">
+	                          <span>平均盈利</span>
+	                          <strong className="positive">{formatMoney(analysisDiagnostics.avgWin)}</strong>
+	                        </div>
+	                        <div className="stats-row">
+	                          <span>平均亏损</span>
+	                          <strong className="negative">{formatMoney(analysisDiagnostics.avgLoss)}</strong>
+	                        </div>
+	                        <div className="stats-row">
+	                          <span>盈亏比</span>
+	                          <strong>{analysisDiagnostics.profitFactor ? analysisDiagnostics.profitFactor.toFixed(2) : '0.00'}</strong>
+	                        </div>
+	                        <div className="stats-row">
+	                          <span>连胜 / 连亏</span>
+	                          <strong>{analysisDiagnostics.maxWinStreak} / {analysisDiagnostics.maxLossStreak}</strong>
+	                        </div>
+	                      </div>
+	                    </section>
 
-                  <section className="card diagnostics-card">
-                    <div className="section-kicker">节奏</div>
-                    <h2>频率</h2>
-                    <div className="stats-table">
-                      <div className="stats-row">
-                        <span>交易笔数</span>
-                        <strong>{analysisSummary.tradeCount}</strong>
-                      </div>
-                      <div className="stats-row">
-                        <span>日均交易</span>
-                        <strong>{analysisSummary.activeDays ? (analysisSummary.tradeCount / analysisSummary.activeDays).toFixed(1) : '0'}</strong>
-                      </div>
-                      <div className="stats-row">
-                        <span>最佳月份</span>
-                        <strong className={monthlyHighlights.best ? getValueTone(monthlyHighlights.best.profit) : 'neutral'}>
-                          {monthlyHighlights.best ? `${monthlyHighlights.best.month.replace('-', '/')} · ${formatMoney(monthlyHighlights.best.profit)}` : '--'}
-                        </strong>
-                      </div>
-                      <div className="stats-row">
-                        <span>最佳单日</span>
-                        <strong className={analysisExtremes.best ? getValueTone(analysisExtremes.best.scopes[analysisScope].profit) : 'neutral'}>
-                          {analysisExtremes.best ? `${formatDateParts(analysisExtremes.best.date).label} · ${formatMoney(analysisExtremes.best.scopes[analysisScope].profit)}` : '--'}
-                        </strong>
-                      </div>
-                      <div className="stats-row">
-                        <span>{analysisHoldingCostMeta.label}</span>
-                        <strong className="negative">{formatMoney(analysisHoldingCostMeta.value, { signed: false })}</strong>
-                      </div>
-                    </div>
-                  </section>
-                </div>
-              </div>
-            ) : null}
+	                    <section className="card diagnostics-card nested-card">
+	                      <div className="section-kicker">节奏</div>
+	                      <h2>频率</h2>
+	                      <div className="stats-table">
+	                        <div className="stats-row">
+	                          <span>交易笔数</span>
+	                          <strong>{analysisSummary.tradeCount}</strong>
+	                        </div>
+	                        <div className="stats-row">
+	                          <span>日均交易</span>
+	                          <strong>{analysisSummary.activeDays ? (analysisSummary.tradeCount / analysisSummary.activeDays).toFixed(1) : '0'}</strong>
+	                        </div>
+	                        <div className="stats-row">
+	                          <span>最佳月份</span>
+	                          <strong className={monthlyHighlights.best ? getValueTone(monthlyHighlights.best.profit) : 'neutral'}>
+	                            {monthlyHighlights.best ? `${monthlyHighlights.best.month.replace('-', '/')} · ${formatMoney(monthlyHighlights.best.profit)}` : '--'}
+	                          </strong>
+	                        </div>
+	                        <div className="stats-row">
+	                          <span>最佳单日</span>
+	                          <strong className={analysisExtremes.best ? getValueTone(analysisExtremes.best.scopes[analysisScope].profit) : 'neutral'}>
+	                            {analysisExtremes.best ? `${formatDateParts(analysisExtremes.best.date).label} · ${formatMoney(analysisExtremes.best.scopes[analysisScope].profit)}` : '--'}
+	                          </strong>
+	                        </div>
+	                        <div className="stats-row">
+	                          <span>{analysisHoldingCostMeta.label}</span>
+	                          <strong className="negative">{formatMoney(analysisHoldingCostMeta.value, { signed: false })}</strong>
+	                        </div>
+	                      </div>
+	                    </section>
+	                  </div>
+	                </CollapsibleSection>
+	              </div>
+	            ) : null}
 
-            {analysisPanel === 'positions' ? (
-              <section className="card">
+	            {analysisPanel === 'positions' ? (
+	              <section className="card">
                 <div className="card-header">
                   <div>
                     <div className="section-kicker">当前在仓</div>
                     <h2>持仓</h2>
                   </div>
                 </div>
-                <div className="stack-list">
-                  {analysisSummary.positions.length ? analysisSummary.positions
-                    .sort((a, b) => (b.quantity * b.avgPrice) - (a.quantity * a.avgPrice))
-                    .map((position) => (
-                      <article className="position-card" key={`${position.assetType}-${position.positionSide}-${position.symbol}`}>
+	                <div className="stack-list">
+	                  {analysisSummary.positions.length ? visiblePositions
+	                    .map((position) => (
+	                      <article className="position-card" key={`${position.assetType}-${position.positionSide}-${position.symbol}`}>
                         <div className="position-head">
                           <div>
                             <div className="badge-row">
@@ -2273,14 +2405,21 @@ export function App() {
                         </div>
                       </article>
                     )) : (
-                      <div className="empty-state">
-                        <div className="empty-icon">📦</div>
-                        <div className="empty-title">当前没有在仓标的</div>
-                      </div>
-                    )}
-                </div>
-              </section>
-            ) : null}
+	                      <div className="empty-state">
+	                        <div className="empty-icon">📦</div>
+	                        <div className="empty-title">当前没有在仓标的</div>
+	                      </div>
+	                    )}
+	                </div>
+	                {isCompactScreen && analysisSummary.positions.length > MOBILE_VISIBLE_LIMIT ? (
+	                  <div className="record-card-actions">
+	                    <button type="button" className="ghost-btn" onClick={() => setShowAllPositions((current) => !current)}>
+	                      {showAllPositions ? '收起持仓' : `展开全部 ${analysisSummary.positions.length} 项`}
+	                    </button>
+	                  </div>
+	                ) : null}
+	              </section>
+	            ) : null}
 
             {analysisPanel === 'ranking' ? (
               <section className="card">
@@ -2308,9 +2447,9 @@ export function App() {
                     ) : null}
                   </div>
                 ) : null}
-                <div className="stack-list">
-                  {analysisSummary.ranking.length ? analysisSummary.ranking.slice(0, 20).map((item, index) => (
-                    <article className="rank-card" key={`${item.symbol}-${index}`}>
+	                <div className="stack-list">
+	                  {analysisSummary.ranking.length ? visibleRanking.map((item, index) => (
+	                    <article className="rank-card" key={`${item.symbol}-${index}`}>
                       <div className="rank-head">
                         <div>
                           <div className="rank-main">#{index + 1} {getStockDisplayName(item.symbol, item.name)}</div>
@@ -2325,12 +2464,19 @@ export function App() {
                   )) : (
                     <div className="empty-state">
                       <div className="empty-icon">🏅</div>
-                      <div className="empty-title">还没有已实现盈亏</div>
-                    </div>
-                  )}
-                </div>
-              </section>
-            ) : null}
+	                      <div className="empty-title">还没有已实现盈亏</div>
+	                    </div>
+	                  )}
+	                </div>
+	                {isCompactScreen && analysisSummary.ranking.length > MOBILE_RANKING_LIMIT ? (
+	                  <div className="record-card-actions">
+	                    <button type="button" className="ghost-btn" onClick={() => setShowAllRanking((current) => !current)}>
+	                      {showAllRanking ? '收起排行' : `展开更多 ${analysisSummary.ranking.length} 项`}
+	                    </button>
+	                  </div>
+	                ) : null}
+	              </section>
+	            ) : null}
 
             {analysisPanel === 'monthly' ? (
               <section className="card analysis-chart-card">
@@ -2341,7 +2487,8 @@ export function App() {
                   </div>
                 </div>
                 <div className="chart-box monthly">
-                  <Bar
+                  <DeferredChart
+                    kind="bar"
                     data={monthlyChartData}
                     options={{
                       responsive: true,
@@ -2370,6 +2517,7 @@ export function App() {
                         }
                       }
                     }}
+                    fallbackTitle="正在载入月度图"
                   />
                 </div>
               </section>
@@ -2477,9 +2625,9 @@ export function App() {
                     <h2>历史</h2>
                   </div>
                 </div>
-                <div className="stack-list">
-                  {dividendSummary.dividendHistory.length ? dividendSummary.dividendHistory.map((item) => (
-                    <article className="history-card" key={item.date}>
+	                <div className="stack-list">
+	                  {dividendSummary.dividendHistory.length ? visibleDividendHistory.map((item) => (
+	                    <article className="history-card" key={item.date}>
                       <div className="history-head">
                         <div>
                           <div className="trade-title">{formatDateParts(item.date).fullLabel}</div>
@@ -2499,12 +2647,19 @@ export function App() {
                   )) : (
                     <div className="empty-state">
                       <div className="empty-icon">🎀</div>
-                      <div className="empty-title">还没有分红</div>
-                    </div>
-                  )}
-                </div>
-              </section>
-            ) : null}
+	                      <div className="empty-title">还没有分红</div>
+	                    </div>
+	                  )}
+	                </div>
+	                {isCompactScreen && dividendSummary.dividendHistory.length > MOBILE_VISIBLE_LIMIT ? (
+	                  <div className="record-card-actions">
+	                    <button type="button" className="ghost-btn" onClick={() => setShowAllDividendHistory((current) => !current)}>
+	                      {showAllDividendHistory ? '收起历史' : `展开全部 ${dividendSummary.dividendHistory.length} 条`}
+	                    </button>
+	                  </div>
+	                ) : null}
+	              </section>
+	            ) : null}
 
             {dividendPanel === 'rules' ? (
               <div className="panel-grid two">
