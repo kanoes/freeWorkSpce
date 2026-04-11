@@ -232,3 +232,38 @@ test('mergeDays treats the latest CSV import side as a full reset source', () =>
   assert.equal(merged[0].trades.some((trade) => trade.symbol === '9999'), false);
   assert.equal(analytics.summaries.all.totalProfit, 200);
 });
+
+test('buildAnalytics closes same-day margin lots even when broker CSV lists closes first', () => {
+  const analytics = buildAnalytics([
+    {
+      date: '2026-04-10',
+      trades: [
+        normalizeTrade({
+          manualType: 'margin_close_long',
+          symbol: '5016',
+          name: 'JX',
+          quantity: 100,
+          price: 4564,
+          settlementAmount: -995,
+          marginSettlement: {
+            source: 'marginSettlements',
+            openDate: '2026-04-10',
+            openSide: '買建',
+            openPrice: 4573.6,
+            closePrice: 4564
+          }
+        }, '2026-04-10', 0),
+        normalizeTrade({
+          manualType: 'margin_open_long',
+          symbol: '5016',
+          name: 'JX',
+          quantity: 100,
+          price: 4573.6
+        }, '2026-04-10', 1)
+      ]
+    }
+  ]);
+
+  assert.equal(analytics.summaries.all.totalProfit, -995);
+  assert.equal(analytics.summaries.all.positionsCount, 0);
+});
