@@ -5,6 +5,7 @@ import { buildAnalytics } from '../src/lib/trade/analytics.js';
 import { rebuildDaysFromCsvFiles } from '../src/lib/trade/csv.js';
 import { mergeDays, normalizeTrade } from '../src/lib/trade/models.js';
 import { createDefaultSettings } from '../src/lib/trade/settings.js';
+import { buildHealthReport } from '../src/lib/view-models.js';
 
 function makeCsvFile(name, text) {
   const bytes = new TextEncoder().encode(text);
@@ -234,7 +235,7 @@ test('mergeDays treats the latest CSV import side as a full reset source', () =>
 });
 
 test('buildAnalytics closes same-day margin lots even when broker CSV lists closes first', () => {
-  const analytics = buildAnalytics([
+  const days = [
     {
       date: '2026-04-10',
       trades: [
@@ -259,11 +260,146 @@ test('buildAnalytics closes same-day margin lots even when broker CSV lists clos
           name: 'JX',
           quantity: 100,
           price: 4573.6
-        }, '2026-04-10', 1)
+        }, '2026-04-10', 1),
+        normalizeTrade({
+          manualType: 'margin_close_short',
+          symbol: '9984',
+          name: 'SoftBank',
+          quantity: 100,
+          price: 990,
+          settlementAmount: 450,
+          marginSettlement: {
+            source: 'marginSettlements',
+            openDate: '2026-04-10',
+            openSide: '売建',
+            openPrice: 995,
+            closePrice: 990
+          }
+        }, '2026-04-10', 2),
+        normalizeTrade({
+          manualType: 'margin_open_short',
+          symbol: '9984',
+          name: 'SoftBank',
+          quantity: 100,
+          price: 995
+        }, '2026-04-10', 3)
+      ]
+    }
+  ];
+  const analytics = buildAnalytics(days);
+  const healthReport = buildHealthReport(days);
+
+  assert.equal(analytics.summaries.all.totalProfit, -545);
+  assert.equal(analytics.summaries.all.positionsCount, 0);
+  assert.equal(analytics.summaries.margin.positionsCount, 0);
+  assert.equal(healthReport.orphanCloseCount, 0);
+});
+
+test('buildAnalytics preserves manual same-day margin order without settlement detail', () => {
+  const analytics = buildAnalytics([
+    {
+      date: '2026-04-11',
+      trades: [
+        normalizeTrade({
+          manualType: 'margin_open_long',
+          symbol: '7777',
+          name: 'Manual Day Trade',
+          quantity: 100,
+          price: 1000
+        }, '2026-04-11', 0),
+        normalizeTrade({
+          manualType: 'margin_close_long',
+          symbol: '7777',
+          name: 'Manual Day Trade',
+          quantity: 100,
+          price: 1010
+        }, '2026-04-11', 1)
       ]
     }
   ]);
 
-  assert.equal(analytics.summaries.all.totalProfit, -995);
   assert.equal(analytics.summaries.all.positionsCount, 0);
+  assert.equal(analytics.summaries.margin.positionsCount, 0);
+});
+
+test('buildAnalytics uses margin settlement details to close the matching lot', () => {
+  const analytics = buildAnalytics([
+    {
+      date: '2026-04-09',
+      trades: [
+        normalizeTrade({
+          manualType: 'margin_open_long',
+          symbol: '5016',
+          name: 'JX',
+          quantity: 100,
+          price: 100
+        }, '2026-04-09', 0),
+        normalizeTrade({
+          manualType: 'margin_open_short',
+          symbol: '9984',
+          name: 'SoftBank',
+          quantity: 100,
+          price: 300
+        }, '2026-04-09', 1)
+      ]
+    },
+    {
+      date: '2026-04-10',
+      trades: [
+        normalizeTrade({
+          manualType: 'margin_close_long',
+          symbol: '5016',
+          name: 'JX',
+          quantity: 100,
+          price: 205,
+          settlementAmount: 500,
+          marginSettlement: {
+            source: 'marginSettlements',
+            openDate: '2026-04-10',
+            openSide: '買建',
+            openPrice: 200,
+            closePrice: 205
+          }
+        }, '2026-04-10', 0),
+        normalizeTrade({
+          manualType: 'margin_open_long',
+          symbol: '5016',
+          name: 'JX',
+          quantity: 100,
+          price: 200
+        }, '2026-04-10', 1),
+        normalizeTrade({
+          manualType: 'margin_close_short',
+          symbol: '9984',
+          name: 'SoftBank',
+          quantity: 100,
+          price: 395,
+          settlementAmount: 500,
+          marginSettlement: {
+            source: 'marginSettlements',
+            openDate: '2026-04-10',
+            openSide: '売建',
+            openPrice: 400,
+            closePrice: 395
+          }
+        }, '2026-04-10', 2),
+        normalizeTrade({
+          manualType: 'margin_open_short',
+          symbol: '9984',
+          name: 'SoftBank',
+          quantity: 100,
+          price: 400
+        }, '2026-04-10', 3)
+      ]
+    }
+  ]);
+  const remainingLongPosition = analytics.summaries.margin.positions.find((position) => position.symbol === '5016');
+  const remainingShortPosition = analytics.summaries.margin.positions.find((position) => position.symbol === '9984');
+
+  assert.equal(analytics.summaries.all.totalProfit, 1000);
+  assert.equal(analytics.summaries.margin.positionsCount, 2);
+  assert.equal(remainingLongPosition.quantity, 100);
+  assert.equal(remainingLongPosition.avgPrice, 100);
+  assert.equal(remainingShortPosition.quantity, 100);
+  assert.equal(remainingShortPosition.avgPrice, 300);
 });

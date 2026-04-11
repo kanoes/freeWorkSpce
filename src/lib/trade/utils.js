@@ -132,6 +132,24 @@ export function compareTradeProcessingOrder(left, right) {
   return compareTradeOrder(left, right);
 }
 
+export function getTradePositionProcessingBucket(trade, dayDate) {
+  if (
+    trade.assetType === 'margin'
+    && trade.positionEffect === 'close'
+    && trade.marginSettlement?.openDate === dayDate
+  ) {
+    return 1;
+  }
+
+  return 0;
+}
+
+export function compareTradePositionProcessingOrder(dayDate, left, right) {
+  const bucketDelta = getTradePositionProcessingBucket(left, dayDate) - getTradePositionProcessingBucket(right, dayDate);
+  if (bucketDelta !== 0) return bucketDelta;
+  return compareTradeOrder(left, right);
+}
+
 export function marketLabelFromKey(key) {
   if (key === 'pts') return 'PTS';
   if (key === 'other') return '其他';

@@ -8,7 +8,7 @@ import {
 } from './position-engine.js';
 import {
   compareByDateAsc,
-  compareTradeOrder,
+  compareTradePositionProcessingOrder,
   getCurrentWeekMondayStr,
   roundMoney,
   sumMoney,
@@ -96,20 +96,6 @@ function calculateDividendWithRule(profit, ruleSnapshot) {
   return Math.floor(amount * ratio);
 }
 
-function getPositionProcessingBucket(trade, dayDate) {
-  if (trade.assetType === 'margin' && trade.positionEffect === 'close') {
-    return trade.marginSettlement?.openDate === dayDate ? 2 : 0;
-  }
-
-  return 1;
-}
-
-function compareTradeForPositionProcessing(dayDate, left, right) {
-  const bucketDelta = getPositionProcessingBucket(left, dayDate) - getPositionProcessingBucket(right, dayDate);
-  if (bucketDelta !== 0) return bucketDelta;
-  return compareTradeOrder(left, right);
-}
-
 export function buildAnalytics(days) {
   const normalizedDays = days.map((day) => normalizeDay(day)).sort(compareByDateAsc);
   const dayViews = normalizedDays.map((day) => ({
@@ -134,7 +120,7 @@ export function buildAnalytics(days) {
     const dayView = dayMap.get(day.date);
     const processingTrades = day.trades
       .map((trade, index) => normalizeTrade(trade, day.date, index))
-      .sort((left, right) => compareTradeForPositionProcessing(day.date, left, right));
+      .sort((left, right) => compareTradePositionProcessingOrder(day.date, left, right));
 
     processingTrades.forEach((trade) => {
       const positionResult = processPositionTrade(positionBooks, trade, day.date);

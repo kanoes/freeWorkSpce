@@ -2,7 +2,7 @@ import { DIVIDEND_START_DATE, MANUAL_TYPE_MAP } from './trade/constants.js';
 import { buildTradeSoftKey, normalizeDay } from './trade/models.js';
 import {
   addDays,
-  compareTradeProcessingOrder,
+  compareTradePositionProcessingOrder,
   formatDateParts,
   getScopeLabel,
   todayStr,
@@ -215,7 +215,7 @@ export function buildHealthReport(days) {
 
   normalizedDays.forEach((day) => {
     [...day.trades]
-      .sort(compareTradeProcessingOrder)
+      .sort((left, right) => compareTradePositionProcessingOrder(day.date, left, right))
       .forEach((trade) => {
         const duplicateKey = trade.fingerprint
           ? `fp:${trade.fingerprint}`

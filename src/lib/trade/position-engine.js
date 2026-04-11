@@ -6,6 +6,8 @@ import {
   safeNumber
 } from './utils.js';
 
+const LOT_PRICE_TOLERANCE = 0.05;
+
 export function createPositionBooks() {
   return {
     cashPositions: new Map(),
@@ -23,7 +25,37 @@ function getTradeHoldingCostOverride(trade) {
   return trade.holdingCost === '' ? null : safeNumber(trade.holdingCost);
 }
 
-function addLongPosition(map, trade, quantity, totalCost, openedDate = '') {
+function getLotUnitPrice(lot, valueKey) {
+  const explicitPrice = safeNumber(lot.openPrice);
+  if (explicitPrice != null) return explicitPrice;
+
+  const quantity = Number(lot.quantity) || 0;
+  const value = Number(lot[valueKey]) || 0;
+  return quantity > 0 && value > 0 ? value / quantity : null;
+}
+
+function createMarginSettlementLotMatcher(trade, valueKey) {
+  const detail = trade.marginSettlement;
+  if (!detail || typeof detail !== 'object') return null;
+
+  // 信用決済明細 identifies the opening lot, so prefer that before falling back to FIFO.
+  const openDate = detail.openDate || '';
+  const openPrice = safeNumber(detail.openPrice);
+  if (!openDate && openPrice == null) return null;
+
+  return (lot) => {
+    if (openDate && lot.openDate !== openDate) return false;
+
+    const lotPrice = getLotUnitPrice(lot, valueKey);
+    if (openPrice != null && lotPrice != null && Math.abs(lotPrice - openPrice) > LOT_PRICE_TOLERANCE) {
+      return false;
+    }
+
+    return true;
+  };
+}
+
+function addLongPosition(map, trade, quantity, totalCost, openedDate = '', openedPrice = null) {
   const symbol = trade.symbol;
   if (!map.has(symbol)) {
     map.set(symbol, {
@@ -45,6 +77,7 @@ function addLongPosition(map, trade, quantity, totalCost, openedDate = '') {
   if (quantity > 0 && totalCost > 0) {
     position.lots.push({
       openDate: openedDate,
+      openPrice: safeNumber(openedPrice) ?? safeNumber(trade.price),
       quantity,
       totalCost
     });
@@ -61,7 +94,7 @@ function finalizeLongPosition(position) {
 }
 
 function reduceLotsByFifo(position, closeQty, closeDate, options = {}) {
-  const { applyHoldingCost = false } = options;
+  const { applyHoldingCost = false, lotMatcher = null } = options;
   if (!Array.isArray(position?.lots) || !position.lots.length) {
     return { costBasis: 0, estimatedHoldingCost: 0, weightedHoldingDays: 0 };
   }
@@ -70,17 +103,13 @@ function reduceLotsByFifo(position, closeQty, closeDate, options = {}) {
   let costBasis = 0;
   let estimatedHoldingCost = 0;
   let weightedHoldingDays = 0;
-  const nextLots = [];
+  const lots = position.lots.map((lot) => ({ ...lot }));
 
-  position.lots.forEach((lot) => {
+  const consumeLot = (lot) => {
     const lotQuantity = Number(lot.quantity) || 0;
     const lotTotalCost = Number(lot.totalCost) || 0;
     if (lotQuantity <= 0 || lotTotalCost <= 0) return;
-
-    if (remainingQuantity <= 1e-8) {
-      nextLots.push(lot);
-      return;
-    }
+    if (remainingQuantity <= 1e-8) return;
 
     const closedQuantity = Math.min(remainingQuantity, lotQuantity);
     const unitCost = lotTotalCost / lotQuantity;
@@ -94,18 +123,20 @@ function reduceLotsByFifo(position, closeQty, closeDate, options = {}) {
     }
 
     const nextQuantity = lotQuantity - closedQuantity;
-    if (nextQuantity > 1e-8) {
-      nextLots.push({
-        ...lot,
-        quantity: nextQuantity,
-        totalCost: roundMoney(unitCost * nextQuantity)
-      });
-    }
-
+    lot.quantity = nextQuantity;
+    lot.totalCost = nextQuantity > 1e-8 ? roundMoney(unitCost * nextQuantity) : 0;
     remainingQuantity -= closedQuantity;
-  });
+  };
 
-  position.lots = nextLots;
+  if (typeof lotMatcher === 'function') {
+    lots.forEach((lot) => {
+      if (lotMatcher(lot)) consumeLot(lot);
+    });
+  }
+
+  lots.forEach(consumeLot);
+
+  position.lots = lots;
   finalizeLongPosition(position);
   return {
     costBasis: roundMoney(costBasis),
@@ -117,7 +148,8 @@ function reduceLotsByFifo(position, closeQty, closeDate, options = {}) {
 function closeLongPosition(map, symbol, quantity, revenue, closeDate, options = {}) {
   const {
     applyHoldingCost = false,
-    holdingCostOverride = null
+    holdingCostOverride = null,
+    lotMatcher = null
   } = options;
   const position = map.get(symbol);
   if (!position || position.quantity <= 0) {
@@ -147,7 +179,7 @@ function closeLongPosition(map, symbol, quantity, revenue, closeDate, options = 
     };
   }
 
-  const lotResult = reduceLotsByFifo(position, closeQty, closeDate, { applyHoldingCost });
+  const lotResult = reduceLotsByFifo(position, closeQty, closeDate, { applyHoldingCost, lotMatcher });
   const costBasis = lotResult.costBasis;
   const grossProfit = roundMoney(revenue - costBasis);
   const estimatedHoldingCost = applyHoldingCost ? lotResult.estimatedHoldingCost : 0;
@@ -171,7 +203,7 @@ function closeLongPosition(map, symbol, quantity, revenue, closeDate, options = 
   };
 }
 
-function addShortPosition(map, trade, quantity, totalEntry, openedDate = '') {
+function addShortPosition(map, trade, quantity, totalEntry, openedDate = '', openedPrice = null) {
   const symbol = trade.symbol;
   if (!map.has(symbol)) {
     map.set(symbol, {
@@ -193,6 +225,7 @@ function addShortPosition(map, trade, quantity, totalEntry, openedDate = '') {
   if (quantity > 0 && totalEntry > 0) {
     position.lots.push({
       openDate: openedDate,
+      openPrice: safeNumber(openedPrice) ?? safeNumber(trade.price),
       quantity,
       totalEntry
     });
@@ -208,24 +241,21 @@ function finalizeShortPosition(position) {
   position.totalEntry = roundMoney(position.lots.reduce((sum, lot) => sum + (Number(lot.totalEntry) || 0), 0));
 }
 
-function reduceShortLotsByFifo(position, closeQty) {
+function reduceShortLotsByFifo(position, closeQty, options = {}) {
+  const { lotMatcher = null } = options;
   if (!Array.isArray(position?.lots) || !position.lots.length) {
     return { entryValue: 0 };
   }
 
   let remainingQuantity = closeQty;
   let entryValue = 0;
-  const nextLots = [];
+  const lots = position.lots.map((lot) => ({ ...lot }));
 
-  position.lots.forEach((lot) => {
+  const consumeLot = (lot) => {
     const lotQuantity = Number(lot.quantity) || 0;
     const lotTotalEntry = Number(lot.totalEntry) || 0;
     if (lotQuantity <= 0 || lotTotalEntry <= 0) return;
-
-    if (remainingQuantity <= 1e-8) {
-      nextLots.push(lot);
-      return;
-    }
+    if (remainingQuantity <= 1e-8) return;
 
     const closedQuantity = Math.min(remainingQuantity, lotQuantity);
     const unitEntry = lotTotalEntry / lotQuantity;
@@ -233,24 +263,26 @@ function reduceShortLotsByFifo(position, closeQty) {
     entryValue += closedEntry;
 
     const nextQuantity = lotQuantity - closedQuantity;
-    if (nextQuantity > 1e-8) {
-      nextLots.push({
-        ...lot,
-        quantity: nextQuantity,
-        totalEntry: roundMoney(unitEntry * nextQuantity)
-      });
-    }
-
+    lot.quantity = nextQuantity;
+    lot.totalEntry = nextQuantity > 1e-8 ? roundMoney(unitEntry * nextQuantity) : 0;
     remainingQuantity -= closedQuantity;
-  });
+  };
 
-  position.lots = nextLots;
+  if (typeof lotMatcher === 'function') {
+    lots.forEach((lot) => {
+      if (lotMatcher(lot)) consumeLot(lot);
+    });
+  }
+
+  lots.forEach(consumeLot);
+
+  position.lots = lots;
   finalizeShortPosition(position);
   return { entryValue: roundMoney(entryValue) };
 }
 
 function closeShortPosition(map, symbol, quantity, costToClose, options = {}) {
-  const { holdingCostOverride = null } = options;
+  const { holdingCostOverride = null, lotMatcher = null } = options;
   const position = map.get(symbol);
   if (!position || position.quantity <= 0) {
     return {
@@ -265,7 +297,7 @@ function closeShortPosition(map, symbol, quantity, costToClose, options = {}) {
   }
 
   const closeQty = Math.min(quantity, position.quantity);
-  const lotResult = reduceShortLotsByFifo(position, closeQty);
+  const lotResult = reduceShortLotsByFifo(position, closeQty, { lotMatcher });
   const entryValue = lotResult.entryValue;
   const grossProfit = roundMoney(entryValue - costToClose);
   const holdingCost = holdingCostOverride != null ? roundMoney(holdingCostOverride) : 0;
@@ -314,7 +346,7 @@ export function processPositionTrade(books, trade, dayDate) {
 
   if (trade.assetType === 'cash') {
     if (trade.action === 'buy') {
-      addLongPosition(books.cashPositions, trade, quantity, buyCost, dayDate);
+      addLongPosition(books.cashPositions, trade, quantity, buyCost, dayDate, price);
       closeValueAmount = buyCost;
     } else {
       const closeResult = closeLongPosition(books.cashPositions, trade.symbol, quantity, sellRevenue, dayDate);
@@ -330,7 +362,7 @@ export function processPositionTrade(books, trade, dayDate) {
     }
   } else if (trade.positionSide === 'short') {
     if (trade.positionEffect === 'open') {
-      addShortPosition(books.marginShortPositions, trade, quantity, roundMoney(grossAmount - fee - taxAmount), dayDate);
+      addShortPosition(books.marginShortPositions, trade, quantity, roundMoney(grossAmount - fee - taxAmount), dayDate, price);
       closeValueAmount = roundMoney(grossAmount - fee - taxAmount);
     } else {
       const closeResult = closeShortPosition(
@@ -338,7 +370,10 @@ export function processPositionTrade(books, trade, dayDate) {
         trade.symbol,
         quantity,
         roundMoney(grossAmount + fee + taxAmount),
-        { holdingCostOverride }
+        {
+          holdingCostOverride,
+          lotMatcher: createMarginSettlementLotMatcher(trade, 'totalEntry')
+        }
       );
       derivedNetProfit = closeResult.derivedNetProfit;
       realizedProfit = reportedClosePnl != null ? reportedClosePnl : derivedNetProfit;
@@ -355,7 +390,7 @@ export function processPositionTrade(books, trade, dayDate) {
           : 'model';
     }
   } else if (trade.positionEffect === 'open') {
-    addLongPosition(books.marginLongPositions, trade, quantity, roundMoney(grossAmount + fee + taxAmount), dayDate);
+    addLongPosition(books.marginLongPositions, trade, quantity, roundMoney(grossAmount + fee + taxAmount), dayDate, price);
     closeValueAmount = roundMoney(grossAmount + fee + taxAmount);
   } else {
     const closeResult = closeLongPosition(
@@ -366,7 +401,8 @@ export function processPositionTrade(books, trade, dayDate) {
       dayDate,
       {
         applyHoldingCost: true,
-        holdingCostOverride
+        holdingCostOverride,
+        lotMatcher: createMarginSettlementLotMatcher(trade, 'totalCost')
       }
     );
     derivedNetProfit = closeResult.derivedNetProfit;

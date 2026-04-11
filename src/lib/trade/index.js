@@ -40,6 +40,7 @@ export {
 } from './store.js';
 export {
   addDays,
+  compareTradePositionProcessingOrder,
   compareTradeProcessingOrder,
   formatDateParts,
   formatMoney,
