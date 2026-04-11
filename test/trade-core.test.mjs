@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { buildAnalytics } from '../src/lib/trade/analytics.js';
 import { rebuildDaysFromCsvFiles } from '../src/lib/trade/csv.js';
-import { normalizeTrade } from '../src/lib/trade/models.js';
+import { mergeDays, normalizeTrade } from '../src/lib/trade/models.js';
 import { createDefaultSettings } from '../src/lib/trade/settings.js';
 
 function makeCsvFile(name, text) {
@@ -112,4 +112,123 @@ test('rebuildDaysFromCsvFiles imports executions and enriches margin closes from
   assert.equal(result.summary.taxDetails[0].totalTax, 11743);
   assert.equal(closeDay.trades.filter((trade) => trade.marginSettlement).length, 3);
   assert.equal(analytics.summaries.all.totalProfit, 46393);
+});
+
+test('mergeDays keeps distinct CSV rows with identical visible trade fields', () => {
+  const settings = createDefaultSettings();
+  const day = {
+    date: '2026-04-01',
+    trades: [
+      normalizeTrade({
+        id: 'csv-open-1',
+        source: 'csv',
+        fingerprint: 'same-visible-open#1',
+        manualType: 'spot_buy',
+        symbol: '1234',
+        name: 'Test',
+        quantity: 100,
+        price: 10,
+        settlementDate: '2026-04-03'
+      }, '2026-04-01', 0, settings),
+      normalizeTrade({
+        id: 'csv-open-2',
+        source: 'csv',
+        fingerprint: 'same-visible-open#2',
+        manualType: 'spot_buy',
+        symbol: '1234',
+        name: 'Test',
+        quantity: 100,
+        price: 10,
+        settlementDate: '2026-04-03'
+      }, '2026-04-01', 1, settings),
+      normalizeTrade({
+        id: 'csv-close',
+        source: 'csv',
+        fingerprint: 'close#1',
+        manualType: 'spot_sell',
+        symbol: '1234',
+        name: 'Test',
+        quantity: 200,
+        price: 11,
+        settlementDate: '2026-04-03'
+      }, '2026-04-01', 2, settings)
+    ]
+  };
+
+  const merged = mergeDays([day], [structuredClone(day)], settings);
+  const analytics = buildAnalytics(merged);
+
+  assert.equal(merged[0].trades.length, 3);
+  assert.equal(analytics.summaries.all.totalProfit, 200);
+});
+
+test('mergeDays can treat the latest CSV import side as authoritative while preserving manual trades', () => {
+  const settings = createDefaultSettings();
+  const localStaleDay = {
+    date: '2026-04-02',
+    trades: [
+      normalizeTrade({
+        id: 'old-open',
+        source: 'csv',
+        fingerprint: 'old-open#1',
+        manualType: 'spot_buy',
+        symbol: '1111',
+        name: 'Old Csv',
+        quantity: 100,
+        price: 10
+      }, '2026-04-02', 0, settings),
+      normalizeTrade({
+        id: 'old-close',
+        source: 'csv',
+        fingerprint: 'old-close#1',
+        manualType: 'spot_sell',
+        symbol: '1111',
+        name: 'Old Csv',
+        quantity: 100,
+        price: 30
+      }, '2026-04-02', 1, settings),
+      normalizeTrade({
+        id: 'manual-note',
+        source: 'manual',
+        manualType: 'spot_buy',
+        symbol: '9999',
+        name: 'Manual',
+        quantity: 1,
+        price: 1
+      }, '2026-04-02', 2, settings)
+    ]
+  };
+  const remoteFreshDay = {
+    date: '2026-04-02',
+    trades: [
+      normalizeTrade({
+        id: 'new-open',
+        source: 'csv',
+        fingerprint: 'new-open#1',
+        manualType: 'spot_buy',
+        symbol: '2222',
+        name: 'Fresh Csv',
+        quantity: 100,
+        price: 10
+      }, '2026-04-02', 0, settings),
+      normalizeTrade({
+        id: 'new-close',
+        source: 'csv',
+        fingerprint: 'new-close#1',
+        manualType: 'spot_sell',
+        symbol: '2222',
+        name: 'Fresh Csv',
+        quantity: 100,
+        price: 12
+      }, '2026-04-02', 1, settings)
+    ]
+  };
+
+  const merged = mergeDays([localStaleDay], [remoteFreshDay], settings, { csvSource: 'remote' });
+  const analytics = buildAnalytics(merged);
+
+  assert.equal(merged[0].trades.length, 3);
+  assert.equal(merged[0].trades.some((trade) => trade.symbol === '1111'), false);
+  assert.equal(merged[0].trades.some((trade) => trade.symbol === '9999'), true);
+  assert.equal(analytics.summaries.all.totalProfit, 200);
 });

@@ -20,6 +20,7 @@ import {
 } from './firebase-sync.js';
 import {
   createManualTrade,
+  isCsvImportedTrade,
   isTradeComplete,
   mergeDays,
   normalizeDay,
@@ -50,6 +51,44 @@ let analytics = buildAnalytics([]);
 async function refreshState() {
   days = (await getAllDays()).map((day) => normalizeDay(day, settings)).sort((left, right) => right.date.localeCompare(left.date));
   analytics = buildAnalytics(days);
+}
+
+function countCsvImportedTrades(rawDays) {
+  return (Array.isArray(rawDays) ? rawDays : []).reduce((total, day) => {
+    const trades = Array.isArray(day?.trades) ? day.trades : [];
+    return total + trades.filter(isCsvImportedTrade).length;
+  }, 0);
+}
+
+function getExpectedCsvImportRows(localSettings, remoteSettings) {
+  const localRows = Number(localSettings?.lastCsvImportSummary?.importedRows);
+  const remoteRows = Number(remoteSettings?.lastCsvImportSummary?.importedRows);
+  if (Number.isFinite(localRows) && localRows > 0) return localRows;
+  if (Number.isFinite(remoteRows) && remoteRows > 0) return remoteRows;
+  return 0;
+}
+
+function getCsvMergeSource(localSettings, remoteSettings, localDays = [], remoteDays = []) {
+  const readTimestamp = (value) => {
+    const time = new Date(value || 0).getTime();
+    return Number.isFinite(time) ? time : 0;
+  };
+  const localImportAt = readTimestamp(localSettings?.lastCsvImportAt);
+  const remoteImportAt = readTimestamp(remoteSettings?.lastCsvImportAt);
+
+  if (localImportAt > remoteImportAt) return 'local';
+  if (remoteImportAt > localImportAt) return 'remote';
+
+  const expectedRows = getExpectedCsvImportRows(localSettings, remoteSettings);
+  if (expectedRows > 0) {
+    const localMatchesImport = countCsvImportedTrades(localDays) === expectedRows;
+    const remoteMatchesImport = countCsvImportedTrades(remoteDays) === expectedRows;
+
+    if (localMatchesImport && !remoteMatchesImport) return 'local';
+    if (remoteMatchesImport && !localMatchesImport) return 'remote';
+  }
+
+  return 'merge';
 }
 
 export function getTradeAppSnapshot() {
@@ -229,8 +268,9 @@ export async function syncWithCloud(options = {}) {
 
   try {
     const remoteSnapshot = await fetchCloudSnapshot();
+    const csvSource = getCsvMergeSource(settings, remoteSnapshot.settings, days, remoteSnapshot.days || []);
     const mergedSettings = mergeSettings(settings, remoteSnapshot.settings);
-    const mergedDays = mergeDays(days, remoteSnapshot.days || [], mergedSettings);
+    const mergedDays = mergeDays(days, remoteSnapshot.days || [], mergedSettings, { csvSource });
 
     settings = persistSettings(mergedSettings);
     await replaceAllDays(mergedDays.map((day) => normalizeDay(day, settings)));

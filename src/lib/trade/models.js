@@ -238,13 +238,31 @@ export function collectManualDaysForCsvRebuild(days, settings = createDefaultSet
   return manualDays;
 }
 
-function getTradeIdentityKeys(date, trade, settings) {
+function getStableTradeIdentityKeys(date, trade, settings) {
   const normalized = normalizeTrade(trade, date, Number(trade?.order) || 0, settings);
   const keys = [];
   if (normalized.id) keys.push(`id:${normalized.id}`);
   if (normalized.fingerprint) keys.push(`fp:${normalized.fingerprint}`);
-  keys.push(`soft:${buildTradeSoftKey(date, normalized, settings)}`);
+  if (!normalized.fingerprint && normalized.csvBaseSignature) keys.push(`csv:${normalized.csvBaseSignature}`);
   return keys;
+}
+
+function canUseSoftTradeKey(trade) {
+  return !isCsvImportedTrade(trade);
+}
+
+function buildSoftTradeIdentityKey(date, trade, settings) {
+  return `soft:${buildTradeSoftKey(date, trade, settings)}`;
+}
+
+function countSoftTradeKeys(date, trades, settings) {
+  const counts = new Map();
+  trades.forEach((trade) => {
+    if (!canUseSoftTradeKey(trade)) return;
+    const key = buildSoftTradeIdentityKey(date, trade, settings);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return counts;
 }
 
 export function mergeTradeVersions(existingTrade, incomingTrade, date, settings = createDefaultSettings()) {
@@ -271,32 +289,99 @@ export function mergeTradeVersions(existingTrade, incomingTrade, date, settings 
 }
 
 export function mergeTradeLists(date, localTrades, remoteTrades, settings = createDefaultSettings()) {
+  const normalizedLocal = (Array.isArray(localTrades) ? localTrades : [])
+    .map((trade, index) => normalizeTrade(trade, date, index, settings));
+  const normalizedRemote = (Array.isArray(remoteTrades) ? remoteTrades : [])
+    .map((trade, index) => normalizeTrade(trade, date, index, settings));
   const merged = [];
-  const keyMap = new Map();
+  const stableKeyMap = new Map();
+  const softKeyMap = new Map();
+  const localSoftCounts = countSoftTradeKeys(date, normalizedLocal, settings);
+  const remoteSoftCounts = countSoftTradeKeys(date, normalizedRemote, settings);
 
-  const registerTrade = (trade) => {
-    const normalized = normalizeTrade(trade, date, merged.length, settings);
-    const keys = getTradeIdentityKeys(date, normalized, settings);
-    const matchedIndex = keys.map((key) => keyMap.get(key)).find((value) => value != null);
+  const indexStableKeys = (trade, index) => {
+    getStableTradeIdentityKeys(date, trade, settings).forEach((key) => stableKeyMap.set(key, index));
+  };
+
+  const registerLocalTrade = (trade) => {
+    const index = merged.push(trade) - 1;
+    indexStableKeys(trade, index);
+
+    if (!canUseSoftTradeKey(trade)) return;
+
+    const softKey = buildSoftTradeIdentityKey(date, trade, settings);
+    if (localSoftCounts.get(softKey) === 1 && remoteSoftCounts.get(softKey) === 1) {
+      softKeyMap.set(softKey, index);
+    }
+  };
+
+  const registerRemoteTrade = (trade) => {
+    const stableKeys = getStableTradeIdentityKeys(date, trade, settings);
+    let matchedIndex = stableKeys.map((key) => stableKeyMap.get(key)).find((value) => value != null);
+
+    if (matchedIndex == null && canUseSoftTradeKey(trade)) {
+      const softKey = buildSoftTradeIdentityKey(date, trade, settings);
+      if (localSoftCounts.get(softKey) === 1 && remoteSoftCounts.get(softKey) === 1) {
+        matchedIndex = softKeyMap.get(softKey);
+      }
+    }
 
     if (matchedIndex == null) {
-      const index = merged.push(normalized) - 1;
-      keys.forEach((key) => keyMap.set(key, index));
+      const index = merged.push(trade) - 1;
+      indexStableKeys(trade, index);
       return;
     }
 
-    const next = mergeTradeVersions(merged[matchedIndex], normalized, date, settings);
+    const next = mergeTradeVersions(merged[matchedIndex], trade, date, settings);
     merged[matchedIndex] = next;
-    getTradeIdentityKeys(date, next, settings).forEach((key) => keyMap.set(key, matchedIndex));
+    indexStableKeys(next, matchedIndex);
   };
 
-  localTrades.forEach(registerTrade);
-  remoteTrades.forEach(registerTrade);
+  normalizedLocal.forEach(registerLocalTrade);
+  normalizedRemote.forEach(registerRemoteTrade);
 
   return reindexTrades(merged.sort(compareTradeOrder), date, settings);
 }
 
-export function mergeDays(localDays, cloudDays, settings = createDefaultSettings()) {
+function splitDayTradesBySource(day, settings) {
+  const normalized = normalizeDay(day, settings);
+  return {
+    csvTrades: normalized.trades.filter(isCsvImportedTrade),
+    manualTrades: normalized.trades.filter((trade) => !isCsvImportedTrade(trade))
+  };
+}
+
+function mergeDayWithAuthoritativeCsv(date, local, remote, settings, csvSource) {
+  const authoritative = csvSource === 'remote' ? remote : local;
+  const localSplit = local ? splitDayTradesBySource(local, settings) : { csvTrades: [], manualTrades: [] };
+  const remoteSplit = remote ? splitDayTradesBySource(remote, settings) : { csvTrades: [], manualTrades: [] };
+  const authoritativeCsvTrades = authoritative
+    ? splitDayTradesBySource(authoritative, settings).csvTrades
+    : [];
+  const manualTrades = mergeTradeLists(date, localSplit.manualTrades, remoteSplit.manualTrades, settings);
+  const trades = reindexTrades([
+    ...authoritativeCsvTrades,
+    ...manualTrades
+  ].sort(compareTradeOrder), date, settings);
+
+  if (!trades.length) return null;
+
+  return normalizeDay({
+    id: local?.id || remote?.id || generateId(),
+    date,
+    trades,
+    updatedAt: new Date(Math.max(
+      new Date(local?.updatedAt || 0).getTime(),
+      new Date(remote?.updatedAt || 0).getTime(),
+      Date.now()
+    )).toISOString()
+  }, settings);
+}
+
+export function mergeDays(localDays, cloudDays, settings = createDefaultSettings(), options = {}) {
+  const csvSource = options.csvSource === 'local' || options.csvSource === 'remote'
+    ? options.csvSource
+    : 'merge';
   const byDate = new Map();
   const localMap = new Map(localDays.map((day) => {
     const normalized = normalizeDay(day, settings);
@@ -311,6 +396,12 @@ export function mergeDays(localDays, cloudDays, settings = createDefaultSettings
   allDates.forEach((date) => {
     const local = localMap.get(date);
     const remote = cloudMap.get(date);
+
+    if (csvSource !== 'merge') {
+      const mergedDay = mergeDayWithAuthoritativeCsv(date, local, remote, settings, csvSource);
+      if (mergedDay) byDate.set(date, mergedDay);
+      return;
+    }
 
     if (!local) {
       byDate.set(date, normalizeDay(remote, settings));
