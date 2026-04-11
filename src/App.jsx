@@ -6,6 +6,7 @@ import {
   importCsvFiles,
   maskEmail,
   parseFirebaseConfigPreview,
+  previewCsvImportFiles,
   RECORDS_PAGE_SIZE,
   saveFirebaseConfig,
   signInWithGoogle,
@@ -30,6 +31,7 @@ import {
 import { BottomNav, Toast } from './components/common.jsx';
 import {
   ConfirmSheet,
+  CsvImportPreviewSheet,
   DividendRuleSheet,
   ManualDaySheet,
   RecordFilterSheet
@@ -73,6 +75,15 @@ function createConfirmState() {
   };
 }
 
+function createCsvPreviewState() {
+  return {
+    open: false,
+    confirming: false,
+    files: [],
+    preview: null
+  };
+}
+
 function getMonthOptions(days) {
   return Array.from(new Set(days.map((day) => day.date.slice(0, 7)))).sort().reverse();
 }
@@ -104,6 +115,7 @@ export function App() {
   const [recordFilterSheetOpen, setRecordFilterSheetOpen] = useState(false);
   const [ruleSheet, setRuleSheet] = useState(createRuleState());
   const [confirmState, setConfirmState] = useState(createConfirmState());
+  const [csvPreviewState, setCsvPreviewState] = useState(createCsvPreviewState());
   const [showAllPositions, setShowAllPositions] = useState(false);
   const [showAllRanking, setShowAllRanking] = useState(false);
   const [showAllDividendHistory, setShowAllDividendHistory] = useState(false);
@@ -181,7 +193,31 @@ export function App() {
     if (!files.length) return;
 
     try {
-      const result = await runTask(() => importCsvFiles(files));
+      const preview = await previewCsvImportFiles(files);
+      setCsvPreviewState({
+        open: true,
+        confirming: false,
+        files,
+        preview
+      });
+    } catch (error) {
+      setToast({ tone: 'danger', text: error.message || String(error) });
+    } finally {
+      event.target.value = '';
+    }
+  }
+
+  function closeCsvPreview() {
+    setCsvPreviewState(createCsvPreviewState());
+  }
+
+  async function confirmCsvImport() {
+    if (!csvPreviewState.files.length || csvPreviewState.confirming) return;
+
+    setCsvPreviewState((current) => ({ ...current, confirming: true }));
+
+    try {
+      const result = await runTask(() => importCsvFiles(csvPreviewState.files));
       const marginSummary = result.summary.marginSettlements;
       const supplementText = marginSummary?.importedRows
         ? `，信用补充 ${result.summary.matchedMarginSettlementRows}/${marginSummary.importedRows} 行`
@@ -189,13 +225,19 @@ export function App() {
       const taxText = result.summary.taxDetails?.length
         ? `，税务 ${result.summary.taxDetails.reduce((sum, item) => sum + (Number(item.taxRows) || 0), 0)} 组`
         : '';
+      const cloudText = result.cloudSynced
+        ? '，已覆盖云端'
+        : result.cloudSyncError
+          ? '，云端覆盖失败，请稍后手动同步'
+          : '';
       setActiveTab('records');
+      setCsvPreviewState(createCsvPreviewState());
       setToast({
-        tone: 'success',
-        text: `导入 ${result.summary.importedRows} 笔交易${supplementText}${taxText}，忽略投信 ${result.summary.skippedInvestmentTrust} 行。`
+        tone: result.cloudSyncError ? 'warning' : 'success',
+        text: `已重建导入 ${result.summary.importedRows} 笔交易${supplementText}${taxText}${cloudText}，忽略投信 ${result.summary.skippedInvestmentTrust} 行。`
       });
-    } finally {
-      event.target.value = '';
+    } catch {
+      setCsvPreviewState((current) => ({ ...current, confirming: false }));
     }
   }
 
@@ -483,6 +525,13 @@ export function App() {
         state={confirmState}
         onCancel={() => setConfirmState(createConfirmState())}
         onConfirm={handleDangerConfirm}
+      />
+
+      <CsvImportPreviewSheet
+        state={csvPreviewState}
+        firebaseSignedIn={snapshot.firebase.isSignedIn}
+        onCancel={closeCsvPreview}
+        onConfirm={confirmCsvImport}
       />
 
       <Toast toast={toast} />

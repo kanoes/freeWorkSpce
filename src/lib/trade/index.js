@@ -29,6 +29,7 @@ export {
   importCsvFile,
   importCsvFiles,
   initializeTradeCore,
+  previewCsvImportFiles,
   removeDayById,
   saveFirebaseConfig,
   signInWithGoogle,

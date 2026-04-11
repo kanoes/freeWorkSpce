@@ -343,37 +343,22 @@ export function mergeTradeLists(date, localTrades, remoteTrades, settings = crea
   return reindexTrades(merged.sort(compareTradeOrder), date, settings);
 }
 
-function splitDayTradesBySource(day, settings) {
-  const normalized = normalizeDay(day, settings);
-  return {
-    csvTrades: normalized.trades.filter(isCsvImportedTrade),
-    manualTrades: normalized.trades.filter((trade) => !isCsvImportedTrade(trade))
-  };
-}
-
 function mergeDayWithAuthoritativeCsv(date, local, remote, settings, csvSource) {
   const authoritative = csvSource === 'remote' ? remote : local;
-  const localSplit = local ? splitDayTradesBySource(local, settings) : { csvTrades: [], manualTrades: [] };
-  const remoteSplit = remote ? splitDayTradesBySource(remote, settings) : { csvTrades: [], manualTrades: [] };
-  const authoritativeCsvTrades = authoritative
-    ? splitDayTradesBySource(authoritative, settings).csvTrades
-    : [];
-  const manualTrades = mergeTradeLists(date, localSplit.manualTrades, remoteSplit.manualTrades, settings);
-  const trades = reindexTrades([
-    ...authoritativeCsvTrades,
-    ...manualTrades
-  ].sort(compareTradeOrder), date, settings);
-
-  if (!trades.length) return null;
+  if (!authoritative) return null;
+  const readTime = (value) => {
+    const time = new Date(value || 0).getTime();
+    return Number.isFinite(time) ? time : 0;
+  };
 
   return normalizeDay({
-    id: local?.id || remote?.id || generateId(),
+    ...authoritative,
+    id: authoritative.id || local?.id || remote?.id || generateId(),
     date,
-    trades,
     updatedAt: new Date(Math.max(
-      new Date(local?.updatedAt || 0).getTime(),
-      new Date(remote?.updatedAt || 0).getTime(),
-      Date.now()
+      readTime(authoritative.updatedAt),
+      readTime(local?.updatedAt),
+      readTime(remote?.updatedAt)
     )).toISOString()
   }, settings);
 }

@@ -147,9 +147,15 @@ export function HomeTab({
             <ScopeToggle value={dashboardScope} onChange={setDashboardScope} />
             <div className="toolbar-row">
               <button type="button" className="primary-btn" onClick={onAddRecord}>新增记录</button>
-              <button type="button" className="ghost-btn" onClick={onImportCsv}>导入 CSV</button>
-              <button type="button" className="ghost-btn" onClick={onOpenSync}>同步</button>
+              <details className="more-actions">
+                <summary className="ghost-btn">更多操作</summary>
+                <div className="more-action-menu">
+                  <button type="button" className="ghost-btn" onClick={onImportCsv}>重建导入 CSV</button>
+                  <button type="button" className="ghost-btn" onClick={onOpenSync}>同步</button>
+                </div>
+              </details>
             </div>
+            <span className="action-note">CSV 会替换本地交易，登录时覆盖云端。</span>
           </>
         )}
       />
@@ -630,8 +636,9 @@ export function SettingsTab({
         </div>
         <div className="toolbar-row">
           <button type="button" className="primary-btn" onClick={onAddRecord}>新增记录</button>
-          <button type="button" className="ghost-btn" onClick={onImportCsv}>导入 CSV</button>
+          <button type="button" className="ghost-btn" onClick={onImportCsv}>重建导入 CSV</button>
         </div>
+        <div className="inline-note">重建导入会替换本机全部交易；已登录时会同步覆盖云端。</div>
         <div className="hero-grid compact-grid">
           <StatCard label="最近导入" value={snapshot.settings.lastCsvImportAt ? formatDateParts(snapshot.settings.lastCsvImportAt).label : '无'} />
           <StatCard label="版本" value={`v${snapshot.version}`} />

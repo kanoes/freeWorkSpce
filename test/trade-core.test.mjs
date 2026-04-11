@@ -162,7 +162,7 @@ test('mergeDays keeps distinct CSV rows with identical visible trade fields', ()
   assert.equal(analytics.summaries.all.totalProfit, 200);
 });
 
-test('mergeDays can treat the latest CSV import side as authoritative while preserving manual trades', () => {
+test('mergeDays treats the latest CSV import side as a full reset source', () => {
   const settings = createDefaultSettings();
   const localStaleDay = {
     date: '2026-04-02',
@@ -227,8 +227,8 @@ test('mergeDays can treat the latest CSV import side as authoritative while pres
   const merged = mergeDays([localStaleDay], [remoteFreshDay], settings, { csvSource: 'remote' });
   const analytics = buildAnalytics(merged);
 
-  assert.equal(merged[0].trades.length, 3);
+  assert.equal(merged[0].trades.length, 2);
   assert.equal(merged[0].trades.some((trade) => trade.symbol === '1111'), false);
-  assert.equal(merged[0].trades.some((trade) => trade.symbol === '9999'), true);
+  assert.equal(merged[0].trades.some((trade) => trade.symbol === '9999'), false);
   assert.equal(analytics.summaries.all.totalProfit, 200);
 });

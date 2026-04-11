@@ -54,6 +54,7 @@ export function initCloudSyncStatus() {
     const data = JSON.parse(raw);
     const directionMap = {
       merge: '安全合并',
+      import: 'CSV 覆盖',
       clear: '清空云端',
       local: '清空本地'
     };
@@ -433,6 +434,10 @@ export async function clearCloudTradeData() {
 
 export function markMergeSyncComplete() {
   recordSyncMeta('merge');
+}
+
+export function markCsvImportSyncComplete() {
+  recordSyncMeta('import');
 }
 
 export function markLocalClearComplete() {

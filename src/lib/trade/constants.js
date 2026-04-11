@@ -31,7 +31,7 @@ export const MANUAL_TYPE_MAP = {
     positionEffect: 'open',
     positionSide: 'long',
     tradeTypeLabel: '株式現物買',
-    label: '现物买'
+    label: '株式現物買'
   },
   spot_sell: {
     assetType: 'cash',
@@ -39,7 +39,7 @@ export const MANUAL_TYPE_MAP = {
     positionEffect: 'close',
     positionSide: 'long',
     tradeTypeLabel: '株式現物売',
-    label: '现物卖'
+    label: '株式現物売'
   },
   margin_open_long: {
     assetType: 'margin',
@@ -47,7 +47,7 @@ export const MANUAL_TYPE_MAP = {
     positionEffect: 'open',
     positionSide: 'long',
     tradeTypeLabel: '信用新規買',
-    label: '信用开多'
+    label: '信用新規買'
   },
   margin_close_long: {
     assetType: 'margin',
@@ -55,7 +55,7 @@ export const MANUAL_TYPE_MAP = {
     positionEffect: 'close',
     positionSide: 'long',
     tradeTypeLabel: '信用返済売',
-    label: '信用平多'
+    label: '信用返済売'
   },
   margin_open_short: {
     assetType: 'margin',
@@ -63,7 +63,7 @@ export const MANUAL_TYPE_MAP = {
     positionEffect: 'open',
     positionSide: 'short',
     tradeTypeLabel: '信用新規売',
-    label: '信用开空'
+    label: '信用新規売'
   },
   margin_close_short: {
     assetType: 'margin',
@@ -71,6 +71,6 @@ export const MANUAL_TYPE_MAP = {
     positionEffect: 'close',
     positionSide: 'short',
     tradeTypeLabel: '信用返済買',
-    label: '信用平空'
+    label: '信用返済買'
   }
 };

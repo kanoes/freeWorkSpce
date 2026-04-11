@@ -9,7 +9,7 @@ import {
 } from '../lib/trade/index.js';
 import { formatMoney } from '../lib/trade/utils.js';
 import { buildHealthReport, getHoldingCostMeta, getValueTone } from '../lib/view-models.js';
-import { EmptyState, ScopeToggle, StatusBadge } from './common.jsx';
+import { EmptyState, ScopeToggle, StatCard, StatusBadge } from './common.jsx';
 
 function Sheet({ open, onClose, title, actions, children, tall = false }) {
   if (!open) return null;
@@ -162,77 +162,83 @@ function TradeEditorCard({
         </label>
       </div>
 
-      <div className="form-grid two">
-        <label className="field-group">
-          <span className="form-label">手续费</span>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            className="form-input"
-            value={trade.fee}
-            onChange={(event) => onUpdateTrade(index, 'fee', event.target.value)}
-          />
-        </label>
-        <label className="field-group">
-          <span className="form-label">税额</span>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            className="form-input"
-            value={trade.taxAmount}
-            onChange={(event) => onUpdateTrade(index, 'taxAmount', event.target.value)}
-          />
-        </label>
-      </div>
+      <details className="advanced-fields">
+        <summary>高级字段：手续费、受渡、备注</summary>
 
-      <div className="form-grid two">
-        <label className="field-group">
-          <span className="form-label">受渡日</span>
-          <input
-            type="date"
-            className="form-input"
-            value={trade.settlementDate}
-            onChange={(event) => onUpdateTrade(index, 'settlementDate', event.target.value)}
-          />
-        </label>
-        <label className="field-group">
-          <span className="form-label">{settlementField.label}</span>
-          <input
-            type="number"
-            step="0.01"
-            className="form-input"
-            placeholder={settlementField.placeholder}
-            value={trade.settlementAmount}
-            onChange={(event) => onUpdateTrade(index, 'settlementAmount', event.target.value)}
-          />
-          <span className="field-note">{settlementField.hint}</span>
-        </label>
-      </div>
+        <div className="advanced-fields-body">
+          <div className="form-grid two">
+            <label className="field-group">
+              <span className="form-label">手续费</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                className="form-input"
+                value={trade.fee}
+                onChange={(event) => onUpdateTrade(index, 'fee', event.target.value)}
+              />
+            </label>
+            <label className="field-group">
+              <span className="form-label">税额</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                className="form-input"
+                value={trade.taxAmount}
+                onChange={(event) => onUpdateTrade(index, 'taxAmount', event.target.value)}
+              />
+            </label>
+          </div>
 
-      {trade.assetType === 'margin' && trade.positionEffect === 'close' ? (
-        <label className="field-group">
-          <span className="form-label">持有成本覆盖</span>
-          <input
-            type="number"
-            step="0.01"
-            className="form-input"
-            value={trade.holdingCost}
-            onChange={(event) => onUpdateTrade(index, 'holdingCost', event.target.value)}
-          />
-        </label>
-      ) : null}
+          <div className="form-grid two">
+            <label className="field-group">
+              <span className="form-label">受渡日</span>
+              <input
+                type="date"
+                className="form-input"
+                value={trade.settlementDate}
+                onChange={(event) => onUpdateTrade(index, 'settlementDate', event.target.value)}
+              />
+            </label>
+            <label className="field-group">
+              <span className="form-label">{settlementField.label}</span>
+              <input
+                type="number"
+                step="0.01"
+                className="form-input"
+                placeholder={settlementField.placeholder}
+                value={trade.settlementAmount}
+                onChange={(event) => onUpdateTrade(index, 'settlementAmount', event.target.value)}
+              />
+              <span className="field-note">{settlementField.hint}</span>
+            </label>
+          </div>
 
-      <label className="field-group">
-        <span className="form-label">备注</span>
-        <textarea
-          className="form-input"
-          rows="3"
-          value={trade.notes}
-          onChange={(event) => onUpdateTrade(index, 'notes', event.target.value)}
-        />
-      </label>
+          {trade.assetType === 'margin' && trade.positionEffect === 'close' ? (
+            <label className="field-group">
+              <span className="form-label">持有成本覆盖</span>
+              <input
+                type="number"
+                step="0.01"
+                className="form-input"
+                value={trade.holdingCost}
+                onChange={(event) => onUpdateTrade(index, 'holdingCost', event.target.value)}
+              />
+            </label>
+          ) : null}
+
+          <label className="field-group">
+            <span className="form-label">备注</span>
+            <textarea
+              className="form-input"
+              rows="3"
+              value={trade.notes}
+              onChange={(event) => onUpdateTrade(index, 'notes', event.target.value)}
+            />
+          </label>
+        </div>
+      </details>
     </article>
   );
 }
@@ -353,6 +359,96 @@ export function RecordFilterSheet({
           />
           <span>紧凑模式</span>
         </label>
+      </div>
+    </Sheet>
+  );
+}
+
+function formatPreviewDateRange(preview) {
+  if (!preview?.dateStart && !preview?.dateEnd) return '未识别';
+  if (preview.dateStart === preview.dateEnd) return formatDateParts(preview.dateStart).fullLabel;
+  return `${formatDateParts(preview.dateStart).fullLabel} 至 ${formatDateParts(preview.dateEnd).fullLabel}`;
+}
+
+export function CsvImportPreviewSheet({
+  state,
+  firebaseSignedIn,
+  onCancel,
+  onConfirm
+}) {
+  if (!state.open || !state.preview) return null;
+
+  const { preview } = state;
+  const summary = preview.summary || {};
+  const marginSummary = summary.marginSettlements || {};
+  const taxTotal = (summary.taxDetails || []).reduce((sum, item) => sum + (Number(item.totalTax) || 0), 0);
+  const fileTypes = summary.fileTypes || {};
+
+  return (
+    <Sheet
+      open={state.open}
+      onClose={state.confirming ? undefined : onCancel}
+      title="确认重建导入"
+      actions={(
+        <>
+          <button type="button" className="ghost-btn" disabled={state.confirming} onClick={onCancel}>取消</button>
+          <button type="button" className="primary-btn" disabled={state.confirming} onClick={onConfirm}>
+            {state.confirming ? '正在导入…' : '确认重建导入'}
+          </button>
+        </>
+      )}
+    >
+      <div className="form-stack">
+        <div className="import-warning">
+          这次操作会用当前 CSV 重新生成交易记录，替换本机全部交易{firebaseSignedIn ? '，并覆盖云端数据。' : '。当前未登录，云端不会立刻覆盖。'}
+        </div>
+
+        <div className="hero-grid compact-grid">
+          <StatCard label="导入交易" value={String(preview.tradeCount || summary.importedRows || 0)} />
+          <StatCard label="预计收益" value={formatMoney(preview.totalProfit || 0)} tone={getValueTone(preview.totalProfit || 0)} />
+          <StatCard label="交易日" value={String(preview.dayCount || 0)} />
+          <StatCard label="日期范围" value={formatPreviewDateRange(preview)} />
+        </div>
+
+        <div className="stack-list compact-gap">
+          <article className="list-card">
+            <div className="list-card-head">
+              <strong>CSV 文件</strong>
+              <StatusBadge tone="neutral">{summary.fileCount || state.files.length}</StatusBadge>
+            </div>
+            <div className="list-card-meta">
+              <span>約定履歴 {fileTypes.executions || 0}</span>
+              <span>信用決済明細 {fileTypes.marginSettlements || 0}</span>
+              <span>譲渡益税明細 {fileTypes.taxDetails || 0}</span>
+              {fileTypes.unknown ? <span>未识别 {fileTypes.unknown}</span> : null}
+            </div>
+          </article>
+
+          <article className="list-card">
+            <div className="list-card-head">
+              <strong>补充与对账</strong>
+              <StatusBadge tone={marginSummary.unmatchedRows ? 'warning' : 'success'}>
+                信用 {summary.matchedMarginSettlementRows || 0}/{marginSummary.importedRows || 0}
+              </StatusBadge>
+            </div>
+            <div className="list-card-meta">
+              <span>税额合计 {taxTotal ? formatMoney(-taxTotal) : '无'}</span>
+              <span>忽略投信 {summary.skippedInvestmentTrust || 0} 行</span>
+              <span>不支持 {summary.skippedUnsupported || 0} 行</span>
+            </div>
+          </article>
+
+          <article className="list-card">
+            <div className="list-card-head">
+              <strong>已选择文件</strong>
+            </div>
+            <div className="file-list">
+              {state.files.map((file) => (
+                <span key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name}</span>
+              ))}
+            </div>
+          </article>
+        </div>
       </div>
     </Sheet>
   );

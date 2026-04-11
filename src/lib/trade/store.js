@@ -7,6 +7,7 @@ import {
   fetchCloudSnapshot,
   getFirebaseState,
   initCloudSyncStatus,
+  markCsvImportSyncComplete,
   markLocalClearComplete,
   markMergeSyncComplete,
   parseFirebaseConfigInput,
@@ -134,9 +135,32 @@ export async function importCsvFile(file) {
   return importCsvFiles([file]);
 }
 
+function buildCsvImportPreview(result) {
+  const nextDays = result.days.map((day) => normalizeDay(day, settings));
+  const dates = nextDays.map((day) => day.date).sort();
+  const nextAnalytics = buildAnalytics(nextDays);
+
+  return {
+    summary: result.summary,
+    dayCount: nextDays.length,
+    tradeCount: nextDays.reduce((total, day) => total + day.trades.length, 0),
+    dateStart: dates[0] || '',
+    dateEnd: dates[dates.length - 1] || '',
+    totalProfit: nextAnalytics.summaries.all.totalProfit,
+    cashProfit: nextAnalytics.summaries.cash.totalProfit,
+    marginProfit: nextAnalytics.summaries.margin.totalProfit
+  };
+}
+
+export async function previewCsvImportFiles(files) {
+  const result = await rebuildDaysFromCsvFiles(files, [], settings);
+  return buildCsvImportPreview(result);
+}
+
 export async function importCsvFiles(files) {
-  const result = await rebuildDaysFromCsvFiles(files, days, settings);
-  await replaceAllDays(result.days.map((day) => normalizeDay(day, settings)));
+  const result = await rebuildDaysFromCsvFiles(files, [], settings);
+  const nextDays = result.days.map((day) => normalizeDay(day, settings));
+  await replaceAllDays(nextDays);
 
   settings = persistSettings({
     ...settings,
@@ -145,8 +169,28 @@ export async function importCsvFiles(files) {
   });
 
   await refreshState();
+
+  let cloudSynced = false;
+  let cloudSyncError = '';
+  if (getFirebaseState().isSignedIn) {
+    setCloudSyncing(true, '正在用 CSV 覆盖云端数据…');
+    try {
+      await writeCloudSnapshot(days.map((day) => normalizeDay(day, settings)), settings);
+      markCsvImportSyncComplete();
+      cloudSynced = true;
+    } catch (error) {
+      cloudSyncError = error.message || String(error);
+      updateCloudSyncStatus('CSV 已导入，本次云端覆盖失败');
+    } finally {
+      setCloudSyncing(false);
+    }
+  }
+
   return {
     summary: result.summary,
+    preview: buildCsvImportPreview(result),
+    cloudSynced,
+    cloudSyncError,
     snapshot: getTradeAppSnapshot()
   };
 }
