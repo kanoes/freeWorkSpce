@@ -1,11 +1,18 @@
 import { APP_VERSION, SETTINGS_KEY } from './constants.js';
 import { trimText } from './utils.js';
 
-export function createDividendRule(assetType, numerator = 1, denominator = 3, updatedAt = new Date().toISOString()) {
+function getDefaultDividendRatio(assetType) {
+  return assetType === 'margin'
+    ? { numerator: 1, denominator: 2 }
+    : { numerator: 1, denominator: 5 };
+}
+
+export function createDividendRule(assetType, numerator, denominator, updatedAt = new Date().toISOString()) {
+  const defaults = getDefaultDividendRatio(assetType);
   return {
     id: `${assetType}-${updatedAt}`,
-    numerator,
-    denominator,
+    numerator: numerator ?? defaults.numerator,
+    denominator: denominator ?? defaults.denominator,
     updatedAt
   };
 }
@@ -18,8 +25,8 @@ export function createDefaultSettings() {
     lastCsvImportAt: '',
     lastCsvImportSummary: null,
     dividendRules: {
-      cash: createDividendRule('cash', 1, 3, now),
-      margin: createDividendRule('margin', 1, 3, now)
+      cash: createDividendRule('cash', 1, 5, now),
+      margin: createDividendRule('margin', 1, 2, now)
     }
   };
 }

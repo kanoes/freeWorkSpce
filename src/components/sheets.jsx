@@ -8,7 +8,7 @@ import {
   trimText
 } from '../lib/trade/index.js';
 import { formatMoney } from '../lib/trade/utils.js';
-import { getHoldingCostMeta, getValueTone } from '../lib/view-models.js';
+import { buildHealthReport, getHoldingCostMeta, getValueTone } from '../lib/view-models.js';
 import { EmptyState, ScopeToggle, StatusBadge } from './common.jsx';
 
 function Sheet({ open, onClose, title, actions, children, tall = false }) {
@@ -33,20 +33,23 @@ function getSettlementFieldConfig(trade) {
   if (trade.assetType === 'cash') {
     return {
       label: '受渡金额',
-      placeholder: trade.action === 'buy' ? '可留空' : '可留空'
+      placeholder: trade.action === 'buy' ? '可留空' : '可留空',
+      hint: '留空时按数量、价格、手续费和税额自动计算。'
     };
   }
 
   if (trade.positionEffect === 'close') {
     return {
       label: '券商净损益',
-      placeholder: '优先使用券商数值'
+      placeholder: '只填净损益，不填成交总额',
+      hint: '留空时按 FIFO 自动算平仓盈亏；填写后会直接覆盖模型结果。'
     };
   }
 
   return {
     label: '参考金额',
-    placeholder: '非必填'
+    placeholder: '非必填',
+    hint: '通常可以留空。'
   };
 }
 
@@ -56,7 +59,9 @@ function TradeEditorCard({
   totalCount,
   onUpdateTrade,
   onMoveTrade,
-  onRemoveTrade
+  onRemoveTrade,
+  onDuplicateTrade,
+  onReverseTrade
 }) {
   const typeOptions = getManualTypeOptions(trade.assetType);
   const settlementField = getSettlementFieldConfig(trade);
@@ -69,6 +74,8 @@ function TradeEditorCard({
           <span>{MANUAL_TYPE_MAP[trade.manualType]?.label || '交易'}</span>
         </div>
         <div className="trade-editor-tools">
+          <button type="button" className="ghost-btn small" onClick={() => onDuplicateTrade(index)}>复制</button>
+          <button type="button" className="ghost-btn small" onClick={() => onReverseTrade(index)}>反向</button>
           <button type="button" className="ghost-btn small" disabled={index === 0} onClick={() => onMoveTrade(index, -1)}>上移</button>
           <button type="button" className="ghost-btn small" disabled={index === totalCount - 1} onClick={() => onMoveTrade(index, 1)}>下移</button>
           <button type="button" className="danger-btn small" onClick={() => onRemoveTrade(index)}>删除</button>
@@ -200,6 +207,7 @@ function TradeEditorCard({
             value={trade.settlementAmount}
             onChange={(event) => onUpdateTrade(index, 'settlementAmount', event.target.value)}
           />
+          <span className="field-note">{settlementField.hint}</span>
         </label>
       </div>
 
@@ -358,6 +366,8 @@ export function ManualDaySheet({
   onUpdateTrade,
   onRemoveTrade,
   onMoveTrade,
+  onDuplicateTrade,
+  onReverseTrade,
   onAddTrade,
   onDeleteDay,
   onSave
@@ -384,6 +394,14 @@ export function ManualDaySheet({
   const previewDay = preview.daysDesc.find((day) => day.date === (previewDate || todayStr()));
   const previewHoldingCost = getHoldingCostMeta(previewDay?.scopes.all);
   const previewProfit = previewDay?.scopes.all.profit || 0;
+  const previewHealth = buildHealthReport(previewDays);
+  const currentDate = previewDate || todayStr();
+  const previewDuplicateExamples = previewHealth.duplicateExamples.filter((item) => item.date === currentDate);
+  const previewOrphanExamples = previewHealth.orphanExamples.filter((item) => item.date === currentDate);
+  const previewCloseTrades = (previewDay?.trades || []).filter((trade) => {
+    const isCashClose = trade.assetType === 'cash' && trade.action === 'sell';
+    return isCashClose || trade.positionEffect === 'close';
+  });
 
   return (
     <Sheet
@@ -413,6 +431,67 @@ export function ManualDaySheet({
           <span>{previewHoldingCost.label} {formatMoney(previewHoldingCost.value, { signed: false })}</span>
         </div>
 
+        {existingSameDate ? (
+          <div className="inline-note">
+            这一天已经有 {normalizeDay(existingSameDate).trades.length} 笔记录，保存后会合并到同一天。
+          </div>
+        ) : null}
+
+        {tradeNeedsReview(previewDuplicateExamples, previewOrphanExamples) ? (
+          <div className="notice-stack">
+            {previewDuplicateExamples.map((item, itemIndex) => (
+              <article className="notice-card" key={`dup-${item.date}-${item.symbol}-${item.tradeTypeLabel}-${itemIndex}`}>
+                <div className="list-card-head">
+                  <strong>检测到重复记录</strong>
+                  <StatusBadge tone="warning">{item.date}</StatusBadge>
+                </div>
+                <div className="list-card-meta">
+                  <span>{item.symbol || item.name || '无代码'} · {item.tradeTypeLabel}</span>
+                  <span>重复会直接叠加当日盈亏和交易笔数。</span>
+                </div>
+              </article>
+            ))}
+            {previewOrphanExamples.map((item, itemIndex) => (
+              <article className="notice-card" key={`orphan-${item.date}-${item.symbol}-${item.tradeTypeLabel}-${itemIndex}`}>
+                <div className="list-card-head">
+                  <strong>检测到未匹配平仓</strong>
+                  <StatusBadge tone="danger">{item.date}</StatusBadge>
+                </div>
+                <div className="list-card-meta">
+                  <span>{item.symbol || item.name || '无代码'} · {item.tradeTypeLabel}</span>
+                  <span>缺少约 {Number(item.missingQuantity) || 0} 股对应开仓。</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
+
+        {previewCloseTrades.length ? (
+          <section className="stack-list compact-gap">
+            <div className="preview-section-head">
+              <strong>平仓预览</strong>
+              <span>这里显示这一天每笔平仓实际会贡献多少盈亏。</span>
+            </div>
+            {previewCloseTrades.map((trade) => (
+              <article className="list-card" key={`${trade.id}-preview`}>
+                <div className="list-card-head">
+                  <div>
+                    <strong>{trade.name || trade.symbol || '未命名交易'}</strong>
+                    <span>{trade.tradeTypeLabel}</span>
+                  </div>
+                  <strong className={getValueTone(trade.realizedProfit)}>{formatMoney(trade.realizedProfit)}</strong>
+                </div>
+                <div className="list-card-meta">
+                  <span>{trade.symbol || '无代码'}</span>
+                  <span>{Number(trade.quantity) || 0} 股</span>
+                  <span>@ {formatMoney(trade.price, { signed: false })}</span>
+                  {trade.profitSource === 'reported' ? <span>按券商净损益</span> : <span>按 FIFO 口径</span>}
+                </div>
+              </article>
+            ))}
+          </section>
+        ) : null}
+
         {state.trades.map((trade, index) => (
           <TradeEditorCard
             key={trade.id}
@@ -422,13 +501,19 @@ export function ManualDaySheet({
             onUpdateTrade={onUpdateTrade}
             onMoveTrade={onMoveTrade}
             onRemoveTrade={onRemoveTrade}
+            onDuplicateTrade={onDuplicateTrade}
+            onReverseTrade={onReverseTrade}
           />
         ))}
 
-        <button type="button" className="secondary-btn wide-btn" onClick={onAddTrade}>新增一笔</button>
+        <button type="button" className="secondary-btn wide-btn" onClick={onAddTrade}>新增一笔（沿用上一笔代码/类型）</button>
       </div>
     </Sheet>
   );
+}
+
+function tradeNeedsReview(duplicates, orphans) {
+  return duplicates.length > 0 || orphans.length > 0;
 }
 
 export function DividendRuleSheet({ state, onCancel, onChange, onSave }) {

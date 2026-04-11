@@ -1,6 +1,6 @@
 import { APP_VERSION } from './constants.js';
 import { buildAnalytics } from './analytics.js';
-import { rebuildDaysFromCsv } from './csv.js';
+import { rebuildDaysFromCsvFiles } from './csv.js';
 import {
   clearCloudTradeData as clearRemoteCloudData,
   consumePendingPostLoginSync,
@@ -92,7 +92,11 @@ export function parseFirebaseConfigPreview(rawText) {
 }
 
 export async function importCsvFile(file) {
-  const result = await rebuildDaysFromCsv(file, days, settings);
+  return importCsvFiles([file]);
+}
+
+export async function importCsvFiles(files) {
+  const result = await rebuildDaysFromCsvFiles(files, days, settings);
   await replaceAllDays(result.days.map((day) => normalizeDay(day, settings)));
 
   settings = persistSettings({

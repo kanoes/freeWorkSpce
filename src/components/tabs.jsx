@@ -451,6 +451,32 @@ export function AnalysisTab({
             <StatCard label="重复记录" value={String(healthReport.duplicateCount)} />
             <StatCard label="未匹配平仓" value={String(healthReport.orphanCloseCount)} />
           </div>
+          <div className="stack-list compact-gap">
+            {healthReport.duplicateExamples.map((item, index) => (
+              <article className="list-card" key={`dup-${item.date}-${item.symbol}-${item.tradeTypeLabel}-${index}`}>
+                <div className="list-card-head">
+                  <strong>重复样例</strong>
+                  <StatusBadge tone="warning">{item.date}</StatusBadge>
+                </div>
+                <div className="list-card-meta">
+                  <span>{item.symbol || item.name || '无代码'} · {item.tradeTypeLabel}</span>
+                  <span>这类重复会把收益和交易笔数重复累加。</span>
+                </div>
+              </article>
+            ))}
+            {healthReport.orphanExamples.map((item, index) => (
+              <article className="list-card" key={`orphan-${item.date}-${item.symbol}-${item.tradeTypeLabel}-${index}`}>
+                <div className="list-card-head">
+                  <strong>未匹配平仓样例</strong>
+                  <StatusBadge tone="danger">{item.date}</StatusBadge>
+                </div>
+                <div className="list-card-meta">
+                  <span>{item.symbol || item.name || '无代码'} · {item.tradeTypeLabel}</span>
+                  <span>缺少约 {Number(item.missingQuantity) || 0} 股的对应开仓。</span>
+                </div>
+              </article>
+            ))}
+          </div>
         </CollapsibleSection>
       ) : null}
     </div>
@@ -587,6 +613,10 @@ export function SettingsTab({
   onAddRecord,
   onImportCsv
 }) {
+  const importSummary = snapshot.settings.lastCsvImportSummary || null;
+  const marginImport = importSummary?.marginSettlements || null;
+  const taxTotal = (importSummary?.taxDetails || []).reduce((sum, item) => sum + (Number(item.totalTax) || 0), 0);
+
   return (
     <div className="page">
       <AppTopBar
@@ -605,6 +635,10 @@ export function SettingsTab({
         <div className="hero-grid compact-grid">
           <StatCard label="最近导入" value={snapshot.settings.lastCsvImportAt ? formatDateParts(snapshot.settings.lastCsvImportAt).label : '无'} />
           <StatCard label="版本" value={`v${snapshot.version}`} />
+          <StatCard label="导入交易" value={importSummary ? String(importSummary.importedRows || 0) : '0'} />
+          <StatCard label="信用补充" value={marginImport ? `${importSummary.matchedMarginSettlementRows || 0}/${marginImport.importedRows || 0}` : '0/0'} />
+          <StatCard label="税额对账" value={taxTotal ? formatMoney(-taxTotal) : '无'} tone={taxTotal ? 'negative' : 'neutral'} />
+          <StatCard label="CSV 文件" value={importSummary?.fileCount ? String(importSummary.fileCount) : '0'} />
         </div>
       </section>
 

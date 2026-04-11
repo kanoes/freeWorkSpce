@@ -12,6 +12,13 @@ import {
   trimText
 } from './utils.js';
 
+const CSV_KIND = {
+  EXECUTIONS: 'executions',
+  MARGIN_SETTLEMENTS: 'marginSettlements',
+  TAX_DETAILS: 'taxDetails',
+  UNKNOWN: 'unknown'
+};
+
 function parseCsvRows(text) {
   const rows = [];
   let row = [];
@@ -65,6 +72,20 @@ function parseCsvRows(text) {
   return rows.filter((cells) => cells.some((cell) => trimText(cell)));
 }
 
+function scoreDecodedText(text) {
+  const markers = [
+    '約定日',
+    '決済日',
+    '銘柄コード',
+    '約定履歴照会',
+    '信用決済明細',
+    '特定口座損益明細'
+  ];
+  const markerScore = markers.reduce((score, marker) => score + (text.includes(marker) ? 10 : 0), 0);
+  const replacementPenalty = (text.match(/\uFFFD/g) || []).length;
+  return markerScore - replacementPenalty;
+}
+
 async function decodeCsvFile(file) {
   const buffer = await file.arrayBuffer();
 
@@ -77,12 +98,43 @@ async function decodeCsvFile(file) {
   };
 
   const shiftJisText = tryDecode('shift-jis');
-  if (shiftJisText.includes('約定日')) return shiftJisText;
-
   const utf8Text = tryDecode('utf-8');
-  if (utf8Text.includes('約定日')) return utf8Text;
+  return scoreDecodedText(utf8Text) > scoreDecodedText(shiftJisText)
+    ? utf8Text
+    : shiftJisText || utf8Text;
+}
 
-  return shiftJisText || utf8Text;
+function findHeaderIndex(rows, firstCell) {
+  return rows.findIndex((cells) => trimText(cells[0]) === firstCell);
+}
+
+function detectCsvKind(rows) {
+  if (findHeaderIndex(rows, '約定日') >= 0) return CSV_KIND.EXECUTIONS;
+  if (findHeaderIndex(rows, '決済日') >= 0) return CSV_KIND.MARGIN_SETTLEMENTS;
+  if (findHeaderIndex(rows, '銘柄コード') >= 0) return CSV_KIND.TAX_DETAILS;
+  return CSV_KIND.UNKNOWN;
+}
+
+function getRecordsAfterHeader(rows, firstCell) {
+  const headerIndex = findHeaderIndex(rows, firstCell);
+  if (headerIndex < 0) return { headers: [], records: [] };
+
+  const headers = rows[headerIndex].map(trimText);
+  const records = rows
+    .slice(headerIndex + 1)
+    .filter((row) => row.some((cell) => trimText(cell)))
+    .map((row) => Object.fromEntries(headers.map((header, index) => [header, trimText(row[index])])));
+
+  return { headers, records };
+}
+
+function toSignedNumber(value) {
+  return safeNumber(trimText(value).replace(/^\+/, ''));
+}
+
+function numberKey(value) {
+  const amount = toSignedNumber(value);
+  return amount == null ? '' : String(amount);
 }
 
 function buildCsvBaseSignature(record, normalizedDate) {
@@ -106,33 +158,150 @@ function buildCsvBaseSignature(record, normalizedDate) {
   return columns.join('|');
 }
 
-function parseBrokerCsv(text, settings) {
-  const rows = parseCsvRows(text);
-  const headerIndex = rows.findIndex((cells) => trimText(cells[0]) === '約定日');
-  if (headerIndex < 0) {
-    throw new Error('没有找到“約定日”表头，请确认导出的是券商约定履历 CSV。');
-  }
+function buildExecutionMarginCloseKey(record, date) {
+  return [
+    date,
+    compactText(record['銘柄コード']),
+    trimText(record['取引']),
+    numberKey(record['約定数量']),
+    numberKey(record['約定単価']),
+    normalizeAnyDate(record['受渡日']) || '',
+    numberKey(record['受渡金額/決済損益'])
+  ].join('|');
+}
 
-  const headers = rows[headerIndex].map(trimText);
-  const getCell = (row, header) => {
-    const index = headers.indexOf(header);
-    return index >= 0 ? trimText(row[index]) : '';
+function buildMarginSettlementKey(record, date) {
+  return [
+    date,
+    compactText(record['銘柄コード']),
+    trimText(record['取引']),
+    numberKey(record['決済数量']),
+    numberKey(record['決済単価']),
+    normalizeAnyDate(record['受渡日']) || '',
+    numberKey(record['受渡金額/決済損益'])
+  ].join('|');
+}
+
+function parseMarginSettlementRecord(record) {
+  const date = normalizeAnyDate(record['決済日']);
+  const settlementAmount = toSignedNumber(record['受渡金額/決済損益']);
+  if (!date || !trimText(record['取引']) || settlementAmount == null) return null;
+
+  return {
+    key: buildMarginSettlementKey(record, date),
+    settlementAmount,
+    marginSettlement: {
+      source: CSV_KIND.MARGIN_SETTLEMENTS,
+      settlementDate: normalizeAnyDate(record['受渡日']) || '',
+      closeMarket: trimText(record['決済市場'] || ''),
+      openMarket: trimText(record['建市場'] || ''),
+      openDate: normalizeAnyDate(record['建日']) || '',
+      openSide: trimText(record['買/売建'] || ''),
+      openPrice: safeNumber(record['建単価']) ?? '',
+      closePrice: safeNumber(record['決済単価']) ?? '',
+      openAmount: safeNumber(record['建代金']) ?? '',
+      closeAmount: safeNumber(record['決済代金']) ?? '',
+      openFee: safeNumber(record['新規建手数料']) ?? '',
+      closeFee: safeNumber(record['決済手数料']) ?? '',
+      managementFee: safeNumber(record['管理費']) ?? '',
+      lendingFee: safeNumber(record['貸株料']) ?? '',
+      interestAmount: safeNumber(record['金利']) ?? '',
+      holdingDays: safeNumber(record['日数']) ?? '',
+      reverseDailyFee: safeNumber(record['逆日歩']) ?? '',
+      consumptionTax: safeNumber(record['消費税']) ?? '',
+      rewritingFee: safeNumber(record['書換料']) ?? '',
+      totalExpenses: safeNumber(record['諸費用計']) ?? ''
+    }
   };
+}
 
-  const dataRows = rows.slice(headerIndex + 1).filter((row) => row.some((cell) => trimText(cell)));
-  const seen = new Map();
+function parseMarginSettlementCsv(rows) {
+  const { records } = getRecordsAfterHeader(rows, '決済日');
+  const details = records.map(parseMarginSettlementRecord).filter(Boolean);
+  const totalPnl = details.reduce((sum, detail) => sum + (Number(detail.settlementAmount) || 0), 0);
+  const totalInterest = details.reduce((sum, detail) => sum + (Number(detail.marginSettlement.interestAmount) || 0), 0);
+  const totalExpenses = details.reduce((sum, detail) => sum + (Number(detail.marginSettlement.totalExpenses) || 0), 0);
+
+  return {
+    details,
+    summary: {
+      rows: records.length,
+      importedRows: details.length,
+      totalPnl,
+      totalInterest,
+      totalExpenses
+    }
+  };
+}
+
+function buildMarginSettlementQueues(details) {
+  const queues = new Map();
+
+  details.forEach((detail) => {
+    const queue = queues.get(detail.key) || [];
+    queue.push(detail);
+    queues.set(detail.key, queue);
+  });
+
+  return queues;
+}
+
+function consumeMarginSettlement(queues, record, date) {
+  const key = buildExecutionMarginCloseKey(record, date);
+  const queue = queues.get(key);
+  if (!queue?.length) return null;
+  return queue.shift();
+}
+
+function parseTaxPeriod(rows) {
+  const headerIndex = findHeaderIndex(rows, '受渡開始年月日');
+  if (headerIndex < 0) return { settlementStartDate: '', settlementEndDate: '' };
+
+  const row = rows[headerIndex + 1] || [];
+  return {
+    settlementStartDate: normalizeAnyDate(row[0]) || '',
+    settlementEndDate: normalizeAnyDate(row[1]) || ''
+  };
+}
+
+function parseTaxCsv(rows) {
+  const { records } = getRecordsAfterHeader(rows, '銘柄コード');
+  const tradeRows = records.filter((record) => trimText(record['銘柄コード']) && trimText(record['銘柄コード']) !== '譲渡益税徴収額');
+  const taxRows = records.filter((record) => trimText(record['銘柄コード']) === '譲渡益税徴収額');
+  const period = parseTaxPeriod(rows);
+
+  const totalProfit = tradeRows.reduce((sum, record) => sum + (toSignedNumber(record['損益金額/徴収額']) || 0), 0);
+  const incomeTax = taxRows.reduce((sum, record) => sum + (toSignedNumber(record['損益金額/徴収額']) || 0), 0);
+  const localTax = taxRows.reduce((sum, record) => sum + (toSignedNumber(record['地方税']) || 0), 0);
+
+  return {
+    summary: {
+      ...period,
+      rows: records.length,
+      tradeRows: tradeRows.length,
+      taxRows: taxRows.length,
+      totalProfit,
+      incomeTax,
+      localTax,
+      totalTax: incomeTax + localTax
+    }
+  };
+}
+
+function parseExecutionRecords(records, settings, marginSettlementQueues, sharedSeen) {
   const trades = [];
   const summary = {
-    totalRows: dataRows.length,
+    totalRows: records.length,
     importedRows: 0,
     skippedInvestmentTrust: 0,
     skippedUnsupported: 0,
-    skippedEmpty: 0
+    skippedEmpty: 0,
+    matchedMarginSettlementRows: 0
   };
 
-  dataRows.forEach((row) => {
-    const rawTradeType = getCell(row, '取引');
-    const rawDate = getCell(row, '約定日');
+  records.forEach((record) => {
+    const rawTradeType = trimText(record['取引']);
+    const rawDate = trimText(record['約定日']);
 
     if (!rawDate || !rawTradeType) {
       summary.skippedEmpty += 1;
@@ -156,28 +325,23 @@ function parseBrokerCsv(text, settings) {
       return;
     }
 
-    const baseSignature = buildCsvBaseSignature({
-      '銘柄': getCell(row, '銘柄'),
-      '銘柄コード': getCell(row, '銘柄コード'),
-      '市場': getCell(row, '市場'),
-      '取引': rawTradeType,
-      '期限': getCell(row, '期限'),
-      '預り': getCell(row, '預り'),
-      '課税': getCell(row, '課税'),
-      '約定数量': getCell(row, '約定数量'),
-      '約定単価': getCell(row, '約定単価'),
-      '手数料/諸経費等': getCell(row, '手数料/諸経費等'),
-      '税額': getCell(row, '税額'),
-      '受渡日': getCell(row, '受渡日'),
-      '受渡金額/決済損益': getCell(row, '受渡金額/決済損益')
-    }, date);
-
-    const ordinal = (seen.get(baseSignature) || 0) + 1;
-    seen.set(baseSignature, ordinal);
+    const baseSignature = buildCsvBaseSignature(record, date);
+    const ordinal = (sharedSeen.get(baseSignature) || 0) + 1;
+    sharedSeen.set(baseSignature, ordinal);
 
     const manualType = descriptor.manualType;
     const config = MANUAL_TYPE_MAP[manualType];
-    const market = normalizeMarketKey(getCell(row, '市場'));
+    const market = normalizeMarketKey(record['市場']);
+    const marginDetail = config.assetType === 'margin' && config.positionEffect === 'close'
+      ? consumeMarginSettlement(marginSettlementQueues, record, date)
+      : null;
+    const settlementAmount = safeNumber(record['受渡金額/決済損益'])
+      ?? marginDetail?.settlementAmount
+      ?? '';
+
+    if (marginDetail) {
+      summary.matchedMarginSettlementRows += 1;
+    }
 
     trades.push({
       date,
@@ -191,20 +355,21 @@ function parseBrokerCsv(text, settings) {
         action: config.action,
         positionEffect: config.positionEffect,
         positionSide: config.positionSide,
-        symbol: compactText(getCell(row, '銘柄コード')),
-        name: trimText(getCell(row, '銘柄')),
+        symbol: compactText(record['銘柄コード']),
+        name: trimText(record['銘柄']),
         market,
-        marketLabel: trimText(getCell(row, '市場') || marketLabelFromKey(market)),
+        marketLabel: trimText(record['市場'] || marketLabelFromKey(market)),
         tradeTypeLabel: rawTradeType,
-        term: trimText(getCell(row, '期限') || '--'),
-        custody: trimText(getCell(row, '預り') || '特定'),
-        taxCategory: trimText(getCell(row, '課税') || '--'),
-        quantity: safeNumber(getCell(row, '約定数量')) ?? '',
-        price: safeNumber(getCell(row, '約定単価')) ?? '',
-        fee: safeNumber(getCell(row, '手数料/諸経費等')) ?? '',
-        taxAmount: safeNumber(getCell(row, '税額')) ?? '',
-        settlementDate: normalizeAnyDate(getCell(row, '受渡日')) || '',
-        settlementAmount: safeNumber(getCell(row, '受渡金額/決済損益')) ?? '',
+        term: trimText(record['期限'] || '--'),
+        custody: trimText(record['預り'] || '特定'),
+        taxCategory: trimText(record['課税'] || '--'),
+        quantity: safeNumber(record['約定数量']) ?? '',
+        price: safeNumber(record['約定単価']) ?? '',
+        fee: safeNumber(record['手数料/諸経費等']) ?? '',
+        taxAmount: safeNumber(record['税額']) ?? '',
+        settlementDate: normalizeAnyDate(record['受渡日']) || marginDetail?.marginSettlement.settlementDate || '',
+        settlementAmount,
+        marginSettlement: marginDetail?.marginSettlement || null,
         notes: '',
         fingerprint: `${baseSignature}#${ordinal}`,
         csvBaseSignature: baseSignature,
@@ -217,13 +382,87 @@ function parseBrokerCsv(text, settings) {
   return { trades, summary };
 }
 
-export async function rebuildDaysFromCsv(file, currentDays, settings) {
+async function readCsvFile(file) {
   const text = await decodeCsvFile(file);
-  const parsed = parseBrokerCsv(text, settings);
+  const rows = parseCsvRows(text);
+  return {
+    name: file?.name || 'CSV',
+    kind: detectCsvKind(rows),
+    rows
+  };
+}
+
+function mergeSummaries(left, right) {
+  return {
+    totalRows: left.totalRows + right.totalRows,
+    importedRows: left.importedRows + right.importedRows,
+    skippedInvestmentTrust: left.skippedInvestmentTrust + right.skippedInvestmentTrust,
+    skippedUnsupported: left.skippedUnsupported + right.skippedUnsupported,
+    skippedEmpty: left.skippedEmpty + right.skippedEmpty,
+    matchedMarginSettlementRows: left.matchedMarginSettlementRows + right.matchedMarginSettlementRows
+  };
+}
+
+export async function rebuildDaysFromCsvFiles(files, currentDays, settings) {
+  const fileList = Array.from(files || []).filter(Boolean);
+  if (!fileList.length) {
+    throw new Error('请选择至少一个 CSV 文件。');
+  }
+
+  const parsedFiles = await Promise.all(fileList.map(readCsvFile));
+  const executionFiles = parsedFiles.filter((file) => file.kind === CSV_KIND.EXECUTIONS);
+  const marginSettlementFiles = parsedFiles.filter((file) => file.kind === CSV_KIND.MARGIN_SETTLEMENTS);
+  const taxFiles = parsedFiles.filter((file) => file.kind === CSV_KIND.TAX_DETAILS);
+  const unknownFiles = parsedFiles.filter((file) => file.kind === CSV_KIND.UNKNOWN);
+
+  if (!executionFiles.length) {
+    throw new Error('没有找到“約定履歴.csv”。请至少上传约定履历，信用决済和税务明细只能作为辅助文件。');
+  }
+
+  const marginSettlementResults = marginSettlementFiles.map((file) => parseMarginSettlementCsv(file.rows));
+  const marginSettlementDetails = marginSettlementResults.flatMap((result) => result.details);
+  const marginSettlementQueues = buildMarginSettlementQueues(marginSettlementDetails);
+  const sharedSeen = new Map();
+
+  let parsed = {
+    trades: [],
+    summary: {
+      totalRows: 0,
+      importedRows: 0,
+      skippedInvestmentTrust: 0,
+      skippedUnsupported: 0,
+      skippedEmpty: 0,
+      matchedMarginSettlementRows: 0
+    }
+  };
+
+  executionFiles.forEach((file) => {
+    const { records } = getRecordsAfterHeader(file.rows, '約定日');
+    const result = parseExecutionRecords(records, settings, marginSettlementQueues, sharedSeen);
+    parsed = {
+      trades: [...parsed.trades, ...result.trades],
+      summary: mergeSummaries(parsed.summary, result.summary)
+    };
+  });
 
   if (!parsed.trades.length) {
     throw new Error('CSV 里没有可导入的现物或信用交易。');
   }
+
+  const taxSummaries = taxFiles.map((file) => parseTaxCsv(file.rows).summary);
+  const marginSettlementSummary = marginSettlementResults.reduce((accumulator, result) => ({
+    rows: accumulator.rows + result.summary.rows,
+    importedRows: accumulator.importedRows + result.summary.importedRows,
+    totalPnl: accumulator.totalPnl + result.summary.totalPnl,
+    totalInterest: accumulator.totalInterest + result.summary.totalInterest,
+    totalExpenses: accumulator.totalExpenses + result.summary.totalExpenses
+  }), {
+    rows: 0,
+    importedRows: 0,
+    totalPnl: 0,
+    totalInterest: 0,
+    totalExpenses: 0
+  });
 
   const now = new Date().toISOString();
   const workingDays = collectManualDaysForCsvRebuild(currentDays, settings);
@@ -273,6 +512,24 @@ export async function rebuildDaysFromCsv(file, currentDays, settings) {
 
   return {
     days,
-    summary: parsed.summary
+    summary: {
+      ...parsed.summary,
+      fileCount: fileList.length,
+      fileTypes: {
+        executions: executionFiles.length,
+        marginSettlements: marginSettlementFiles.length,
+        taxDetails: taxFiles.length,
+        unknown: unknownFiles.length
+      },
+      marginSettlements: {
+        ...marginSettlementSummary,
+        unmatchedRows: Math.max(0, marginSettlementSummary.importedRows - parsed.summary.matchedMarginSettlementRows)
+      },
+      taxDetails: taxSummaries
+    }
   };
+}
+
+export async function rebuildDaysFromCsv(file, currentDays, settings) {
+  return rebuildDaysFromCsvFiles([file], currentDays, settings);
 }

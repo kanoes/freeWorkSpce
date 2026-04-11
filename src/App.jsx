@@ -1,27 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 
 import {
-  buildAnalytics,
-  buildNextTradeFromType,
   clearCloudTradeData,
   clearLocalTradeData,
-  findCompanyNameBySymbol,
-  getTradeAppSnapshot,
-  importCsvFile,
-  initializeTradeCore,
+  importCsvFiles,
   maskEmail,
-  normalizeTrade,
   parseFirebaseConfigPreview,
   RECORDS_PAGE_SIZE,
-  removeDayById,
   saveFirebaseConfig,
   signInWithGoogle,
   signOutFromFirebase,
   syncWithCloud,
   todayStr,
   trimText,
-  updateDividendRule,
-  upsertManualDay
+  updateDividendRule
 } from './lib/trade/index.js';
 import {
   buildAnalysisDiagnostics,
@@ -49,6 +41,8 @@ import {
   RecordsTab,
   SettingsTab
 } from './components/tabs.jsx';
+import { useManualDayEditor } from './hooks/use-manual-day-editor.js';
+import { useTradeSnapshot } from './hooks/use-trade-snapshot.js';
 
 const MOBILE_BREAKPOINT = '(max-width: 720px)';
 const MOBILE_VISIBLE_LIMIT = 8;
@@ -62,39 +56,6 @@ const DEFAULT_RECORD_FILTERS = {
   sort: 'desc',
   compact: false
 };
-
-const EMPTY_SNAPSHOT = {
-  version: '5.0.0',
-  settings: {
-    lastCsvImportAt: '',
-    lastCsvImportSummary: null,
-    dividendRules: {
-      cash: { numerator: 1, denominator: 3, updatedAt: '' },
-      margin: { numerator: 1, denominator: 3, updatedAt: '' }
-    }
-  },
-  days: [],
-  analytics: buildAnalytics([]),
-  firebase: {
-    configText: '',
-    isSignedIn: false,
-    isSyncing: false,
-    syncStatusText: '尚未同步',
-    authStatusText: '还没有填写 Firebase Web 配置。',
-    user: null
-  }
-};
-
-function createEmptySheetState() {
-  const date = todayStr();
-  return {
-    open: false,
-    mode: 'add',
-    dayId: '',
-    date,
-    trades: []
-  };
-}
 
 function createRuleState() {
   return {
@@ -121,9 +82,16 @@ function isCompactViewport() {
 }
 
 export function App() {
-  const [snapshot, setSnapshot] = useState(EMPTY_SNAPSHOT);
-  const [ready, setReady] = useState(false);
-  const [initialError, setInitialError] = useState('');
+  const [toast, setToast] = useState(null);
+  const {
+    snapshot,
+    ready,
+    initialError,
+    firebaseDraft,
+    setFirebaseDraft,
+    applySnapshot,
+    runTask
+  } = useTradeSnapshot({ setToast });
   const [isCompactScreen, setIsCompactScreen] = useState(isCompactViewport);
   const [activeTab, setActiveTab] = useState('home');
   const [dashboardScope, setDashboardScope] = useState('all');
@@ -134,49 +102,30 @@ export function App() {
   const [recordsPage, setRecordsPage] = useState(0);
   const [recordFilters, setRecordFilters] = useState(DEFAULT_RECORD_FILTERS);
   const [recordFilterSheetOpen, setRecordFilterSheetOpen] = useState(false);
-  const [manualSheet, setManualSheet] = useState(createEmptySheetState());
   const [ruleSheet, setRuleSheet] = useState(createRuleState());
   const [confirmState, setConfirmState] = useState(createConfirmState());
-  const [firebaseDraft, setFirebaseDraft] = useState('');
   const [showAllPositions, setShowAllPositions] = useState(false);
   const [showAllRanking, setShowAllRanking] = useState(false);
   const [showAllDividendHistory, setShowAllDividendHistory] = useState(false);
-  const [toast, setToast] = useState(null);
   const csvInputRef = useRef(null);
-  const bootSyncedRef = useRef(false);
-
-  function applySnapshot(nextSnapshot) {
-    setSnapshot(nextSnapshot);
-    setFirebaseDraft(nextSnapshot.firebase.configText || '');
-  }
-
-  useEffect(() => {
-    let active = true;
-
-    initializeTradeCore()
-      .then((nextSnapshot) => {
-        if (!active) return;
-        applySnapshot(nextSnapshot);
-        setReady(true);
-      })
-      .catch((error) => {
-        if (!active) return;
-        setInitialError(error.message || String(error));
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!ready || bootSyncedRef.current || !snapshot.firebase.isSignedIn) return;
-    bootSyncedRef.current = true;
-
-    syncWithCloud({ silent: true })
-      .then((nextSnapshot) => applySnapshot(nextSnapshot))
-      .catch(() => {});
-  }, [ready, snapshot.firebase.isSignedIn]);
+  const {
+    manualSheet,
+    setManualDate,
+    openAddSheet,
+    openEditSheet,
+    closeManualSheet,
+    handleManualTradeUpdate,
+    handleManualRemove,
+    handleManualMove,
+    handleManualAdd,
+    handleManualDuplicate,
+    handleManualReverse,
+    handleManualSave,
+    handleDeleteDay
+  } = useManualDayEditor({
+    runTask,
+    onSaved: () => setActiveTab('records')
+  });
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -210,154 +159,6 @@ export function App() {
     setShowAllDividendHistory(false);
   }, [analysisScope, dividendScope, activeTab, isCompactScreen]);
 
-  async function runTask(task, options = {}) {
-    try {
-      const result = await task();
-      if (result?.version) {
-        applySnapshot(result);
-      } else if (result?.snapshot?.version) {
-        applySnapshot(result.snapshot);
-      } else {
-        applySnapshot(getTradeAppSnapshot());
-      }
-
-      if (options.successText) {
-        setToast({ tone: 'success', text: options.successText });
-      }
-
-      return result;
-    } catch (error) {
-      setToast({ tone: 'danger', text: error.message || String(error) });
-      throw error;
-    }
-  }
-
-  function openAddSheet() {
-    const date = todayStr();
-    setManualSheet({
-      open: true,
-      mode: 'add',
-      dayId: '',
-      date,
-      trades: [normalizeTrade(buildNextTradeFromType({}, 'spot_buy', date), date, 0)]
-    });
-  }
-
-  function openEditSheet(day) {
-    setManualSheet({
-      open: true,
-      mode: 'edit',
-      dayId: day.id,
-      date: day.date,
-      trades: structuredClone(day.trades)
-    });
-  }
-
-  function closeManualSheet() {
-    setManualSheet(createEmptySheetState());
-  }
-
-  function handleManualTradeUpdate(index, field, value) {
-    setManualSheet((current) => {
-      const nextTrades = [...current.trades];
-      const existing = nextTrades[index];
-      if (!existing) return current;
-
-      let nextTrade = { ...existing, updatedAt: new Date().toISOString() };
-
-      if (field === 'assetType') {
-        const fallbackType = value === 'margin' ? 'margin_open_long' : 'spot_buy';
-        nextTrade = buildNextTradeFromType(nextTrade, fallbackType, current.date || todayStr());
-      } else if (field === 'manualType') {
-        nextTrade = buildNextTradeFromType(nextTrade, value, current.date || todayStr());
-      } else {
-        nextTrade = normalizeTrade({
-          ...nextTrade,
-          [field]: value
-        }, current.date || todayStr(), index);
-      }
-
-      nextTrades[index] = nextTrade;
-      return { ...current, trades: nextTrades };
-    });
-
-    if (field === 'symbol') {
-      findCompanyNameBySymbol(value).then((companyName) => {
-        if (!companyName) return;
-        setManualSheet((current) => {
-          const nextTrades = [...current.trades];
-          const target = nextTrades[index];
-          if (!target || trimText(target.name) || trimText(target.symbol) !== trimText(value)) return current;
-          nextTrades[index] = normalizeTrade({
-            ...target,
-            name: companyName
-          }, current.date || todayStr(), index);
-          return { ...current, trades: nextTrades };
-        });
-      });
-    }
-  }
-
-  function handleManualRemove(index) {
-    setManualSheet((current) => {
-      const nextTrades = current.trades.filter((_, tradeIndex) => tradeIndex !== index);
-      return {
-        ...current,
-        trades: nextTrades.length ? nextTrades : [normalizeTrade(buildNextTradeFromType({}, 'spot_buy', current.date || todayStr()), current.date || todayStr(), 0)]
-      };
-    });
-  }
-
-  function handleManualMove(index, offset) {
-    setManualSheet((current) => {
-      const targetIndex = index + offset;
-      if (targetIndex < 0 || targetIndex >= current.trades.length) return current;
-
-      const nextTrades = [...current.trades];
-      const [movedTrade] = nextTrades.splice(index, 1);
-      nextTrades.splice(targetIndex, 0, movedTrade);
-
-      return {
-        ...current,
-        trades: nextTrades.map((trade, tradeIndex) => normalizeTrade({
-          ...trade,
-          order: tradeIndex
-        }, current.date || todayStr(), tradeIndex))
-      };
-    });
-  }
-
-  function handleManualAdd() {
-    setManualSheet((current) => ({
-      ...current,
-      trades: [
-        ...current.trades,
-        normalizeTrade(buildNextTradeFromType({}, 'spot_buy', current.date || todayStr()), current.date || todayStr(), current.trades.length)
-      ]
-    }));
-  }
-
-  async function handleManualSave() {
-    await runTask(
-      () => upsertManualDay({
-        date: manualSheet.date,
-        trades: manualSheet.trades,
-        dayId: manualSheet.mode === 'edit' ? manualSheet.dayId : ''
-      }),
-      {
-        successText: manualSheet.mode === 'edit' ? '已更新交易日。' : '已保存交易日。'
-      }
-    );
-    closeManualSheet();
-    setActiveTab('records');
-  }
-
-  async function handleDeleteDay() {
-    if (!manualSheet.dayId) return;
-    await runTask(() => removeDayById(manualSheet.dayId), { successText: '已删除交易日。' });
-    closeManualSheet();
-  }
-
   function openRuleEditor(target) {
     const rule = snapshot.settings.dividendRules[target];
     setRuleSheet({
@@ -376,15 +177,22 @@ export function App() {
   }
 
   async function handleCsvImport(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
 
     try {
-      const result = await runTask(() => importCsvFile(file));
+      const result = await runTask(() => importCsvFiles(files));
+      const marginSummary = result.summary.marginSettlements;
+      const supplementText = marginSummary?.importedRows
+        ? `，信用补充 ${result.summary.matchedMarginSettlementRows}/${marginSummary.importedRows} 行`
+        : '';
+      const taxText = result.summary.taxDetails?.length
+        ? `，税务 ${result.summary.taxDetails.reduce((sum, item) => sum + (Number(item.taxRows) || 0), 0)} 组`
+        : '';
       setActiveTab('records');
       setToast({
         tone: 'success',
-        text: `导入 ${result.summary.importedRows} 行，忽略投信 ${result.summary.skippedInvestmentTrust} 行。`
+        text: `导入 ${result.summary.importedRows} 笔交易${supplementText}${taxText}，忽略投信 ${result.summary.skippedInvestmentTrust} 行。`
       });
     } finally {
       event.target.value = '';
@@ -530,7 +338,7 @@ export function App() {
 
   return (
     <>
-      <input ref={csvInputRef} type="file" accept=".csv,text/csv" hidden onChange={handleCsvImport} />
+      <input ref={csvInputRef} type="file" accept=".csv,text/csv" multiple hidden onChange={handleCsvImport} />
 
       <div className="app-shell">
         {activeTab === 'home' ? (
@@ -653,10 +461,12 @@ export function App() {
         state={manualSheet}
         snapshot={snapshot}
         onCancel={closeManualSheet}
-        onChangeDate={(value) => setManualSheet((current) => ({ ...current, date: value }))}
+        onChangeDate={setManualDate}
         onUpdateTrade={handleManualTradeUpdate}
         onRemoveTrade={handleManualRemove}
         onMoveTrade={handleManualMove}
+        onDuplicateTrade={handleManualDuplicate}
+        onReverseTrade={handleManualReverse}
         onAddTrade={handleManualAdd}
         onDeleteDay={handleDeleteDay}
         onSave={handleManualSave}

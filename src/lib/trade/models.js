@@ -1,5 +1,4 @@
 import { MANUAL_TYPE_MAP } from './constants.js';
-import { getStockDisplayName } from './company-data.js';
 import { cloneActiveRuleSnapshot, createDefaultSettings, normalizeRuleSnapshot } from './settings.js';
 import {
   compactText,
@@ -16,6 +15,39 @@ import {
 
 function resolveSettings(settings) {
   return settings || createDefaultSettings();
+}
+
+function normalizeOptionalNumber(value) {
+  return value === '' ? '' : (safeNumber(value) ?? '');
+}
+
+function normalizeMarginSettlement(rawDetail) {
+  if (!rawDetail || typeof rawDetail !== 'object') return null;
+
+  const detail = {
+    source: trimText(rawDetail.source || ''),
+    settlementDate: normalizeAnyDate(rawDetail.settlementDate) || '',
+    closeMarket: trimText(rawDetail.closeMarket || ''),
+    openMarket: trimText(rawDetail.openMarket || ''),
+    openDate: normalizeAnyDate(rawDetail.openDate) || '',
+    openSide: trimText(rawDetail.openSide || ''),
+    openPrice: normalizeOptionalNumber(rawDetail.openPrice),
+    closePrice: normalizeOptionalNumber(rawDetail.closePrice),
+    openAmount: normalizeOptionalNumber(rawDetail.openAmount),
+    closeAmount: normalizeOptionalNumber(rawDetail.closeAmount),
+    openFee: normalizeOptionalNumber(rawDetail.openFee),
+    closeFee: normalizeOptionalNumber(rawDetail.closeFee),
+    managementFee: normalizeOptionalNumber(rawDetail.managementFee),
+    lendingFee: normalizeOptionalNumber(rawDetail.lendingFee),
+    interestAmount: normalizeOptionalNumber(rawDetail.interestAmount),
+    holdingDays: normalizeOptionalNumber(rawDetail.holdingDays),
+    reverseDailyFee: normalizeOptionalNumber(rawDetail.reverseDailyFee),
+    consumptionTax: normalizeOptionalNumber(rawDetail.consumptionTax),
+    rewritingFee: normalizeOptionalNumber(rawDetail.rewritingFee),
+    totalExpenses: normalizeOptionalNumber(rawDetail.totalExpenses)
+  };
+
+  return Object.values(detail).some((value) => value !== '' && value != null) ? detail : null;
 }
 
 export function inferManualTypeFromFields(assetType, action, positionEffect, positionSide) {
@@ -119,7 +151,7 @@ export function normalizeTrade(trade, dayDate, index = 0, settings = createDefau
     updatedAt: raw.updatedAt || raw.createdAt || new Date().toISOString(),
     order: Number.isFinite(Number(raw.order)) ? Number(raw.order) : index,
     symbol,
-    name: trimText(raw.name || getStockDisplayName(symbol)),
+    name: trimText(raw.name || ''),
     manualType: fallbackManualType,
     assetType,
     action: raw.action || config.action,
@@ -141,6 +173,7 @@ export function normalizeTrade(trade, dayDate, index = 0, settings = createDefau
     notes: trimText(raw.notes || ''),
     fingerprint: trimText(raw.fingerprint || ''),
     csvBaseSignature: trimText(raw.csvBaseSignature || ''),
+    marginSettlement: normalizeMarginSettlement(raw.marginSettlement),
     ratioSnapshot: normalizeRuleSnapshot(raw.ratioSnapshot || cloneActiveRuleSnapshot(nextSettings, assetType), assetType)
   };
 }
@@ -232,6 +265,7 @@ export function mergeTradeVersions(existingTrade, incomingTrade, date, settings 
     notes: preferred.notes || secondary.notes,
     fingerprint: preferred.fingerprint || secondary.fingerprint,
     csvBaseSignature: preferred.csvBaseSignature || secondary.csvBaseSignature,
+    marginSettlement: preferred.marginSettlement || secondary.marginSettlement || null,
     ratioSnapshot: preferred.ratioSnapshot || secondary.ratioSnapshot || cloneActiveRuleSnapshot(settings, preferred.assetType)
   }, date, Number(preferred.order) || 0, settings);
 }

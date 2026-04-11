@@ -528,6 +528,39 @@ textarea {
   border: 1px solid var(--line);
 }
 
+.preview-section-head {
+  display: grid;
+  gap: 4px;
+}
+
+.preview-section-head span,
+.inline-note {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.field-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.inline-note,
+.notice-card {
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 250, 244, 0.92);
+}
+
+.notice-stack {
+  display: grid;
+  gap: 10px;
+}
+
 .trade-editor-tools {
   display: flex;
   gap: 8px;

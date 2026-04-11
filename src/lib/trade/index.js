@@ -27,6 +27,7 @@ export {
   createDraftTrade,
   getTradeAppSnapshot,
   importCsvFile,
+  importCsvFiles,
   initializeTradeCore,
   removeDayById,
   saveFirebaseConfig,
